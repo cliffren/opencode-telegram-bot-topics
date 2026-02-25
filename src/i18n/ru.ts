@@ -94,11 +94,11 @@ export const ru: I18nDictionary = {
   "projects.selected":
     "✅ Проект выбран: {project}\n\n📋 Сессия сброшена. Используйте /sessions или /new для работы с этим проектом.",
   "projects.select_error": "🔴 Ошибка при выборе проекта.",
-
   "sessions.project_not_selected":
     "🏗 Проект не выбран.\n\nСначала выберите проект командой /projects.",
   "sessions.empty": "📭 Сессий нет.\n\nСоздайте новую сессию командой /new.",
   "sessions.select": "Выберите сессию:",
+  "sessions.select_sub": "Выберите сессию (основную или дочернюю):",
   "sessions.fetch_error":
     "🔴 OpenCode Server недоступен или произошла ошибка при получении списка сессий.",
   "sessions.select_project_first": "🔴 Проект не выбран. Используйте /projects.",
@@ -286,6 +286,29 @@ export const ru: I18nDictionary = {
   "rename.button.cancel": "❌ Отмена",
 
   "cmd.description.rename": "Переименовать текущую сессию",
+  "cmd.description.screenshot": "Сделать скриншот и отправить",
+  "cmd.description.sendfile": "Отправить файл в чат",
+
+  "sendfile.usage": "Использование: /sendfile <путь_к_файлу>\n\nПример: /sendfile /path/to/image.png",
+  "sendfile.file_not_found": "🔴 Файл не найден",
+  "sendfile.not_a_file": "🔴 Путь не является файлом",
+  "sendfile.too_large": "🔴 Файл слишком большой: {size}КБ (макс {limit}КБ)",
+  "sendfile.too_large_unknown": "🔴 Файл слишком большой (макс {limit}КБ)",
+  "sendfile.error": "🔴 Не удалось отправить файл",
+  "sendfile.multiple_found": "📁 Найдено несколько совпадений для `{path}`. Выберите файл:",
+  "sendfile.choice.cancel": "Отмена",
+  "sendfile.choice.cancelled": "❌ Выбор файла отменен.",
+  "sendfile.choice.expired": "Выбор устарел. Запросите файл снова.",
+  "sendfile.choice.sent": "✅ Отправлено: `{path}`",
+  "sendfile.choice.failed": "🔴 Не удалось отправить выбранный файл для `{path}`",
+
+  "screenshot.capturing": "📸 Делаю скриншот...",
+  "screenshot.sent": "✅ Скриншот сделан и отправлен\n`{path}`",
+  "screenshot.failed":
+    "🔴 Не удалось сделать скриншот. Разрешите доступ к записи экрана и повторите попытку.",
+  "screenshot.failed_thread":
+    "🔴 Не удалось отправить скриншот в эту тему (тема не найдена). Повторите команду прямо в нужной теме.",
+  "screenshot.unsupported": "⚠️ Создание скриншота сейчас поддерживается только на macOS.",
 
   "cli.usage":
     "Использование:\n  opencode-telegram [start] [--mode sources|installed]\n  opencode-telegram status\n  opencode-telegram stop\n  opencode-telegram config\n\nЗаметки:\n  - Без команды по умолчанию используется `start`\n  - `--mode` сейчас поддерживается только для `start`",
@@ -315,4 +338,10 @@ export const ru: I18nDictionary = {
     "🎤 Распознавание голоса не настроено.\n\nУстановите STT_API_URL и STT_API_KEY в .env для включения.",
   "stt.error": "🔴 Не удалось распознать аудио: {error}",
   "stt.empty_result": "🎤 В аудиосообщении не обнаружена речь.",
+
+  "image.downloading": "📥 Загружаю изображение...",
+  "image.download_failed": "🔴 Не удалось загрузить изображение",
+  "image.sending_to_opencode": "🤖 Отправляю в OpenCode...",
+  "image.sent": "✅ Изображение отправлено в OpenCode",
+  "image.error": "🔴 Не удалось обработать изображение: {error}",
 };

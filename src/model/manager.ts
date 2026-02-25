@@ -1,4 +1,9 @@
-import { getCurrentModel, setCurrentModel } from "../settings/manager.js";
+import {
+  getCurrentModel,
+  getScopedModel,
+  setCurrentModel,
+  setScopedModel,
+} from "../settings/manager.js";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 import type { ModelInfo, FavoriteModel } from "./types.js";
@@ -6,6 +11,10 @@ import path from "node:path";
 
 interface OpenCodeModelState {
   favorite?: Array<{ providerID?: string; modelID?: string }>;
+}
+
+export function getModelScopeKey(chatId: number | null, threadId: number | null): string {
+  return `${chatId ?? "none"}:${threadId ?? "private"}`;
 }
 
 function getEnvDefaultModel(): FavoriteModel | null {
@@ -113,6 +122,13 @@ export function fetchCurrentModel(): ModelInfo {
   return getStoredModel();
 }
 
+export function fetchCurrentModelForScope(
+  threadId: number | null,
+  chatId: number | null,
+): ModelInfo {
+  return getStoredModel(threadId, chatId);
+}
+
 /**
  * Select model and persist to settings
  * @param modelInfo Model to select
@@ -122,12 +138,37 @@ export function selectModel(modelInfo: ModelInfo): void {
   setCurrentModel(modelInfo);
 }
 
+export function selectModelForScope(
+  modelInfo: ModelInfo,
+  threadId: number | null,
+  chatId: number | null,
+): void {
+  const scopeKey = getModelScopeKey(chatId, threadId);
+  logger.info(
+    `[ModelManager] >>> SELECTING scoped model for ${scopeKey}: ${modelInfo.providerID}/${modelInfo.modelID}`,
+  );
+
+  setScopedModel(scopeKey, modelInfo);
+  setCurrentModel(modelInfo);
+}
+
 /**
  * Get stored model from settings (synchronous)
  * ALWAYS returns a model - fallback to config if not found
  * @returns Current model info
  */
-export function getStoredModel(): ModelInfo {
+export function getStoredModel(threadId: number | null = null, chatId: number | null = null): ModelInfo {
+  const scopeKey = getModelScopeKey(chatId, threadId);
+  const scopedModel = getScopedModel(scopeKey);
+  if (scopedModel) {
+    logger.debug(`[ModelManager] Found scoped model for ${scopeKey}: ${scopedModel.providerID}/${scopedModel.modelID}`);
+    if (!scopedModel.variant) {
+      scopedModel.variant = "default";
+    }
+    return scopedModel;
+  }
+
+  logger.debug(`[ModelManager] No scoped model for ${scopeKey}, using global/fallback`);
   const storedModel = getCurrentModel();
 
   if (storedModel) {

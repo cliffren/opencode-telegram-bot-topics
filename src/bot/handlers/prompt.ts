@@ -2,7 +2,12 @@ import { Bot, Context } from "grammy";
 import { opencodeClient } from "../../opencode/client.js";
 import { clearSession, getCurrentSession, setCurrentSession } from "../../session/manager.js";
 import { ingestSessionInfoForCache } from "../../session/cache-manager.js";
-import { getCurrentProject } from "../../settings/manager.js";
+import {
+  clearScopedSession,
+  getCurrentProject,
+  getScopedSession,
+  setScopedSession,
+} from "../../settings/manager.js";
 import { getStoredAgent } from "../../agent/manager.js";
 import { getStoredModel } from "../../model/manager.js";
 import { formatVariantForButton } from "../../variant/manager.js";
@@ -21,6 +26,51 @@ import { t } from "../../i18n/index.js";
 /** Module-level references for async callbacks that don't have ctx. */
 let botInstance: Bot<Context> | null = null;
 let chatIdInstance: number | null = null;
+let threadIdInstance: number | null = null;
+
+/** Chat/thread scoped session mapping for Topic + private isolation */
+const scopedSessionMap = new Map<string, { id: string; title: string; directory: string }>();
+
+function getSessionScopeKey(chatId: number | null, threadId: number | null): string {
+  return `${chatId ?? "none"}:${threadId ?? "private"}`;
+}
+
+function getThreadId(ctx: Context): number | null {
+  return ctx.message?.message_thread_id ?? null;
+}
+
+export function setCurrentSessionByThread(threadId: number | null, chatId: number | null): void {
+  const currentSession = getCurrentSession();
+  if (!currentSession) {
+    return;
+  }
+
+  const scopeKey = getSessionScopeKey(chatId, threadId);
+  scopedSessionMap.set(scopeKey, currentSession);
+  setScopedSession(scopeKey, currentSession);
+}
+
+export function getCurrentSessionByThread(threadId: number | null, chatId: number | null): { id: string; title: string; directory: string } | null {
+  const scopeKey = getSessionScopeKey(chatId, threadId);
+  const inMemory = scopedSessionMap.get(scopeKey);
+  if (inMemory) {
+    return inMemory;
+  }
+
+  const persisted = getScopedSession(scopeKey);
+  if (!persisted) {
+    return null;
+  }
+
+  scopedSessionMap.set(scopeKey, persisted);
+  return persisted;
+}
+
+export function clearSessionByThread(threadId: number | null, chatId: number | null): void {
+  const scopeKey = getSessionScopeKey(chatId, threadId);
+  scopedSessionMap.delete(scopeKey);
+  clearScopedSession(scopeKey);
+}
 
 export function getPromptBotInstance(): Bot<Context> | null {
   return botInstance;
@@ -28,6 +78,10 @@ export function getPromptBotInstance(): Bot<Context> | null {
 
 export function getPromptChatId(): number | null {
   return chatIdInstance;
+}
+
+export function getPromptThreadId(): number | null {
+  return threadIdInstance;
 }
 
 async function isSessionBusy(sessionId: string, directory: string): Promise<boolean> {
@@ -52,11 +106,53 @@ async function isSessionBusy(sessionId: string, directory: string): Promise<bool
   }
 }
 
-async function resetMismatchedSessionContext(): Promise<void> {
+async function isSessionKnown(sessionId: string, directory: string): Promise<boolean | null> {
+  try {
+    const { data, error } = await opencodeClient.session.get({
+      sessionID: sessionId,
+      directory,
+    });
+
+    if (error) {
+      const errorText =
+        error instanceof Error
+          ? error.message
+          : (() => {
+              try {
+                return JSON.stringify(error);
+              } catch {
+                return String(error);
+              }
+            })();
+
+      if (/not found|404/i.test(errorText)) {
+        return false;
+      }
+
+      logger.warn("[Bot] Failed to verify session existence:", error);
+      return null;
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    return true;
+  } catch (err) {
+    logger.warn("[Bot] Error verifying session existence:", err);
+    return null;
+  }
+}
+
+async function resetMismatchedSessionContext(threadId: number | null, chatId: number | null): Promise<void> {
   stopEventListening();
   summaryAggregator.clear();
   clearAllInteractionState("session_mismatch_reset");
   clearSession();
+  
+  // Clear thread session for Topic isolation
+  clearSessionByThread(threadId, chatId);
+  
   keyboardManager.clearContext();
 
   if (!pinnedMessageManager.isInitialized()) {
@@ -75,6 +171,15 @@ export interface ProcessPromptDeps {
   ensureEventSubscription: (directory: string) => Promise<void>;
 }
 
+export type PromptFilePartInput = {
+  type: "file";
+  mime: string;
+  url: string;
+  filename?: string;
+};
+
+type PromptPartInput = { type: "text"; text: string } | PromptFilePartInput;
+
 /**
  * Processes a user prompt: ensures project/session, subscribes to events, and sends
  * the prompt to OpenCode. Used by both text and voice message handlers.
@@ -85,6 +190,7 @@ export async function processUserPrompt(
   ctx: Context,
   text: string,
   deps: ProcessPromptDeps,
+  extraParts: PromptFilePartInput[] = [],
 ): Promise<boolean> {
   const { bot, ensureEventSubscription } = deps;
 
@@ -96,32 +202,49 @@ export async function processUserPrompt(
 
   botInstance = bot;
   chatIdInstance = ctx.chat!.id;
+  threadIdInstance = getThreadId(ctx);
 
-  // Initialize pinned message manager if not already
-  if (!pinnedMessageManager.isInitialized()) {
-    pinnedMessageManager.initialize(bot.api, ctx.chat!.id);
-  }
+  // For Topic isolation, get session by threadId
+  const currentThreadId = getThreadId(ctx);
+  let currentSession = getCurrentSessionByThread(currentThreadId, ctx.chat?.id ?? null);
+  logger.info(
+    `[Prompt] Thread routing: threadId=${currentThreadId ?? "none"}, session=${currentSession?.id ?? "none"}`,
+  );
 
-  // Initialize keyboard manager if not already
-  keyboardManager.initialize(bot.api, ctx.chat!.id);
-
-  let currentSession = getCurrentSession();
-
+  // Check project/session directory match
   if (currentSession && currentSession.directory !== currentProject.worktree) {
     logger.warn(
       `[Bot] Session/project mismatch detected. sessionDirectory=${currentSession.directory}, projectDirectory=${currentProject.worktree}. Resetting session context.`,
     );
-    await resetMismatchedSessionContext();
+    await resetMismatchedSessionContext(currentThreadId, ctx.chat?.id ?? null);
     await ctx.reply(t("bot.session_reset_project_mismatch"));
     return false;
+  }
+
+  if (currentSession) {
+    const sessionKnown = await isSessionKnown(currentSession.id, currentSession.directory);
+    if (sessionKnown === false) {
+      logger.warn(
+        `[Bot] Mapped session not found on server, will create new session. sessionId=${currentSession.id}, chatId=${ctx.chat?.id ?? "none"}, threadId=${currentThreadId ?? "none"}`,
+      );
+      clearSessionByThread(currentThreadId, ctx.chat?.id ?? null);
+      currentSession = null;
+    }
   }
 
   if (!currentSession) {
     await ctx.reply(t("bot.creating_session"));
 
-    const { data: session, error } = await opencodeClient.session.create({
+    const sessionCreateOptions: { directory: string; title?: string } = {
       directory: currentProject.worktree,
-    });
+    };
+    
+    // Add Topic ID to session title for isolation
+    if (currentThreadId) {
+      sessionCreateOptions.title = `Topic ${currentThreadId}`;
+    }
+
+    const { data: session, error } = await opencodeClient.session.create(sessionCreateOptions);
 
     if (error || !session) {
       await ctx.reply(t("bot.create_session_error"));
@@ -139,17 +262,24 @@ export async function processUserPrompt(
     };
 
     setCurrentSession(currentSession);
+    
+    // Store session for Topic/private isolation and persist mapping
+    setCurrentSessionByThread(currentThreadId, ctx.chat?.id ?? null);
+    
     await ingestSessionInfoForCache(session);
 
     // Create pinned message for new session
     try {
+      if (!pinnedMessageManager.isInitialized() || pinnedMessageManager.getState().chatId !== ctx.chat!.id) {
+        pinnedMessageManager.initialize(ctx.api, ctx.chat!.id);
+      }
       await pinnedMessageManager.onSessionChange(session.id, session.title);
     } catch (err) {
       logger.error("[Bot] Error creating pinned message for new session:", err);
     }
 
-    const currentAgent = getStoredAgent();
-    const currentModel = getStoredModel();
+    const currentAgent = getStoredAgent(currentThreadId, ctx.chat?.id ?? null);
+    const currentModel = getStoredModel(currentThreadId, ctx.chat?.id ?? null);
     const contextInfo = pinnedMessageManager.getContextInfo();
     const variantName = formatVariantForButton(currentModel.variant || "default");
     const keyboard = createMainKeyboard(
@@ -170,12 +300,19 @@ export async function processUserPrompt(
     // Ensure pinned message exists for existing session
     if (!pinnedMessageManager.getState().messageId) {
       try {
+        if (!pinnedMessageManager.isInitialized() || pinnedMessageManager.getState().chatId !== ctx.chat!.id) {
+          pinnedMessageManager.initialize(ctx.api, ctx.chat!.id);
+        }
         await pinnedMessageManager.onSessionChange(currentSession.id, currentSession.title);
       } catch (err) {
         logger.error("[Bot] Error creating pinned message for existing session:", err);
       }
     }
   }
+
+  // Keep global session state in sync with current thread session.
+  // Several downstream callbacks still rely on getCurrentSession().
+  setCurrentSession(currentSession);
 
   await ensureEventSubscription(currentSession.directory);
 
@@ -190,20 +327,20 @@ export async function processUserPrompt(
   }
 
   try {
-    const currentAgent = getStoredAgent();
-    const storedModel = getStoredModel();
+    const currentAgent = getStoredAgent(currentThreadId, ctx.chat?.id ?? null);
+    const storedModel = getStoredModel(currentThreadId, ctx.chat?.id ?? null);
 
     const promptOptions: {
       sessionID: string;
       directory: string;
-      parts: Array<{ type: "text"; text: string }>;
+      parts: PromptPartInput[];
       model?: { providerID: string; modelID: string };
       agent?: string;
       variant?: string;
     } = {
       sessionID: currentSession.id,
       directory: currentSession.directory,
-      parts: [{ type: "text", text }],
+      parts: [{ type: "text", text }, ...extraParts],
       agent: currentAgent,
     };
 

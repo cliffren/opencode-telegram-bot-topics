@@ -10,6 +10,7 @@ import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { PermissionRequest, PermissionReply } from "../../permission/types.js";
 import type { I18nKey } from "../../i18n/en.js";
 import { t } from "../../i18n/index.js";
+import { getPromptThreadId } from "./prompt.js";
 
 // Permission type display names
 const PERMISSION_NAME_KEYS: Record<string, I18nKey> = {
@@ -158,6 +159,7 @@ async function handlePermissionReply(
   const currentProject = getCurrentProject();
   const currentSession = getCurrentSession();
   const chatId = ctx.chat?.id;
+  const threadId = ctx.callbackQuery?.message?.message_thread_id ?? null;
   const directory = currentSession?.directory ?? currentProject?.worktree;
 
   if (!directory || !chatId) {
@@ -201,7 +203,7 @@ async function handlePermissionReply(
       if (error) {
         logger.error("[PermissionHandler] Failed to send permission reply:", error);
         if (ctx.api && chatId) {
-          void ctx.api.sendMessage(chatId, t("permission.send_reply_error")).catch(() => {});
+          void ctx.api.sendMessage(chatId, t("permission.send_reply_error"), { message_thread_id: threadId ?? undefined }).catch(() => {});
         }
         return;
       }
@@ -232,6 +234,7 @@ export async function showPermissionRequest(
 ): Promise<void> {
   logger.debug(`[PermissionHandler] Showing permission request: ${request.permission}`);
 
+  const threadId = getPromptThreadId();
   const text = formatPermissionText(request);
   const keyboard = buildPermissionKeyboard();
 
@@ -239,6 +242,7 @@ export async function showPermissionRequest(
     const message = await bot.sendMessage(chatId, text, {
       reply_markup: keyboard,
       parse_mode: "Markdown",
+      message_thread_id: threadId ?? undefined,
     });
 
     logger.debug(`[PermissionHandler] Message sent, messageId=${message.message_id}`);
@@ -247,6 +251,8 @@ export async function showPermissionRequest(
     syncPermissionInteractionState({
       requestID: request.id,
       messageId: message.message_id,
+      interactionChatId: chatId,
+      interactionThreadId: threadId,
     });
 
     summaryAggregator.stopTypingIndicator();

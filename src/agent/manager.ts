@@ -1,9 +1,18 @@
 import { opencodeClient } from "../opencode/client.js";
 import { getCurrentProject } from "../settings/manager.js";
 import { getCurrentSession } from "../session/manager.js";
-import { getCurrentAgent, setCurrentAgent } from "../settings/manager.js";
+import {
+  getCurrentAgent,
+  getScopedAgent,
+  setCurrentAgent,
+  setScopedAgent,
+} from "../settings/manager.js";
 import { logger } from "../utils/logger.js";
 import type { AgentInfo } from "./types.js";
+
+export function getAgentScopeKey(chatId: number | null, threadId: number | null): string {
+  return `${chatId ?? "none"}:${threadId ?? "private"}`;
+}
 
 /**
  * Get list of available agents from OpenCode API
@@ -47,8 +56,12 @@ export async function getAvailableAgents(): Promise<AgentInfo[]> {
  * Get current agent from last session message or settings
  * @returns Current agent name or undefined
  */
-export async function fetchCurrentAgent(): Promise<string | undefined> {
-  const storedAgent = getCurrentAgent();
+export async function fetchCurrentAgent(
+  threadId: number | null = null,
+  chatId: number | null = null,
+): Promise<string | undefined> {
+  const scopedAgent = getScopedAgent(getAgentScopeKey(chatId, threadId));
+  const storedAgent = scopedAgent ?? getCurrentAgent();
   const session = getCurrentSession();
   const project = getCurrentProject();
 
@@ -83,6 +96,9 @@ export async function fetchCurrentAgent(): Promise<string | undefined> {
 
     // No stored agent yet: sync from session history
     if (lastAgent && lastAgent !== storedAgent) {
+      if (chatId !== null || threadId !== null) {
+        setScopedAgent(getAgentScopeKey(chatId, threadId), lastAgent);
+      }
       setCurrentAgent(lastAgent);
     }
 
@@ -98,7 +114,18 @@ export async function fetchCurrentAgent(): Promise<string | undefined> {
  * @param agentName Name of the agent to select
  */
 export function selectAgent(agentName: string): void {
-  logger.info(`[AgentManager] Selected agent: ${agentName}`);
+  logger.info(`[AgentManager] Selected agent (global): ${agentName}`);
+  setCurrentAgent(agentName);
+}
+
+export function selectAgentForScope(
+  agentName: string,
+  threadId: number | null,
+  chatId: number | null,
+): void {
+  const scopeKey = getAgentScopeKey(chatId, threadId);
+  logger.info(`[AgentManager] Selected scoped agent for ${scopeKey}: ${agentName}`);
+  setScopedAgent(scopeKey, agentName);
   setCurrentAgent(agentName);
 }
 
@@ -106,6 +133,11 @@ export function selectAgent(agentName: string): void {
  * Get stored agent from settings (synchronous)
  * @returns Current agent name or default "build"
  */
-export function getStoredAgent(): string {
+export function getStoredAgent(threadId: number | null = null, chatId: number | null = null): string {
+  const scopedAgent = getScopedAgent(getAgentScopeKey(chatId, threadId));
+  if (scopedAgent) {
+    return scopedAgent;
+  }
+
   return getCurrentAgent() ?? "build";
 }

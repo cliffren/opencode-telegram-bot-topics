@@ -29,6 +29,21 @@ function getOptionalPositiveIntEnvVar(key: string, defaultValue: number): number
   return parsedValue;
 }
 
+function getOptionalNonNegativeIntEnvVar(key: string, defaultValue: number): number {
+  const value = getEnvVar(key, false);
+
+  if (!value) {
+    return defaultValue;
+  }
+
+  const parsedValue = Number.parseInt(value, 10);
+  if (Number.isNaN(parsedValue) || parsedValue < 0) {
+    return defaultValue;
+  }
+
+  return parsedValue;
+}
+
 function getOptionalNonNegativeIntEnvVarFromKeys(keys: string[], defaultValue: number): number {
   for (const key of keys) {
     const value = getEnvVar(key, false);
@@ -113,10 +128,16 @@ export const config = {
       5,
     ),
     hideThinkingMessages: getOptionalBooleanEnvVar("HIDE_THINKING_MESSAGES", false),
-    hideToolCallMessages: getOptionalBooleanEnvVar("HIDE_TOOL_CALL_MESSAGES", false),
+    hideToolCallMessages: getOptionalBooleanEnvVar("HIDE_TOOL_CALL_MESSAGES", true),
   },
   files: {
     maxFileSizeKb: parseInt(getEnvVar("CODE_FILE_MAX_SIZE_KB", false) || "100", 10),
+    autoSendImagesDir: getEnvVar("AUTO_SEND_IMAGES_DIR", false),
+    tempDir: getEnvVar("TEMP_DIR", false) || undefined,
+  },
+  external: {
+    sendFileRequestsDir: getEnvVar("SEND_FILE_REQUESTS_DIR", false) || undefined,
+    sendFileRequestPollIntervalMs: getOptionalNonNegativeIntEnvVar("SEND_FILE_REQUEST_POLL_INTERVAL_MS", 2000),
   },
   stt: {
     apiUrl: getEnvVar("STT_API_URL", false),

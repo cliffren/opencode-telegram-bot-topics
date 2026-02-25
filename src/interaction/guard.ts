@@ -45,6 +45,42 @@ function classifyIncomingInput(ctx: Context): {
   return { inputType: "other" };
 }
 
+function getContextThreadId(ctx: Context): number | null {
+  const callbackMessage = ctx.callbackQuery?.message;
+  if (callbackMessage && "message_thread_id" in callbackMessage) {
+    const threadId = (callbackMessage as { message_thread_id?: number }).message_thread_id;
+    if (typeof threadId === "number") {
+      return threadId;
+    }
+  }
+
+  const message = ctx.message;
+  if (message && "message_thread_id" in message) {
+    const threadId = (message as { message_thread_id?: number }).message_thread_id;
+    if (typeof threadId === "number") {
+      return threadId;
+    }
+  }
+
+  return null;
+}
+
+function isStateFromDifferentContext(ctx: Context, state: InteractionState): boolean {
+  const scopedChatId = state.metadata.interactionChatId;
+  const scopedThreadId = state.metadata.interactionThreadId;
+
+  if (typeof scopedChatId === "number" && ctx.chat?.id !== scopedChatId) {
+    return true;
+  }
+
+  if (typeof scopedThreadId === "number") {
+    const currentThreadId = getContextThreadId(ctx);
+    return currentThreadId !== scopedThreadId;
+  }
+
+  return false;
+}
+
 function getExpectedInputBlockReason(expectedInput: ExpectedInput): BlockReason {
   switch (expectedInput) {
     case "callback":
@@ -98,6 +134,10 @@ export function resolveInteractionGuardDecision(ctx: Context): GuardDecision {
   const { inputType, command } = classifyIncomingInput(ctx);
 
   if (!state) {
+    return createAllowDecision(inputType, null, command);
+  }
+
+  if (isStateFromDifferentContext(ctx, state)) {
     return createAllowDecision(inputType, null, command);
   }
 

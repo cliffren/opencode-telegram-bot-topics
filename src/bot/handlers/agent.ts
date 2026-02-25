@@ -1,5 +1,10 @@
 import { Context, InlineKeyboard } from "grammy";
-import { selectAgent, getAvailableAgents, fetchCurrentAgent } from "../../agent/manager.js";
+import {
+  selectAgentForScope,
+  getAvailableAgents,
+  fetchCurrentAgent,
+  getStoredAgent,
+} from "../../agent/manager.js";
 import { getAgentDisplayName, getAgentEmoji } from "../../agent/types.js";
 import { getStoredModel } from "../../model/manager.js";
 import { formatVariantForButton } from "../../variant/manager.js";
@@ -11,6 +16,7 @@ import {
   clearActiveInlineMenu,
   ensureActiveInlineMenu,
   replyWithInlineMenu,
+  resolveInlineInteractionScope,
 } from "./inline-menu.js";
 import { t } from "../../i18n/index.js";
 
@@ -44,14 +50,18 @@ export async function handleAgentSelect(ctx: Context): Promise<boolean> {
 
     const agentName = callbackQuery.data.replace("agent:", "");
 
+    const scope = resolveInlineInteractionScope(ctx);
+    const threadId = scope.threadId;
+    const chatId = scope.chatId;
+
     // Select agent and persist
-    selectAgent(agentName);
+    selectAgentForScope(agentName, threadId, chatId);
 
     // Update keyboard manager state
     keyboardManager.updateAgent(agentName);
 
     // Update Reply Keyboard with new agent, current model, and context
-    const currentModel = getStoredModel();
+    const currentModel = getStoredModel(threadId, chatId);
     const contextInfo =
       pinnedMessageManager.getContextInfo() ??
       (pinnedMessageManager.getContextLimit() > 0
@@ -127,7 +137,10 @@ export async function buildAgentSelectionMenu(currentAgent?: string): Promise<In
  * @param ctx grammY context
  */
 export async function showAgentSelectionMenu(ctx: Context): Promise<void> {
-  const currentAgent = await fetchCurrentAgent();
+  const scope = resolveInlineInteractionScope(ctx);
+  const currentAgent =
+    (await fetchCurrentAgent(scope.threadId, scope.chatId)) ??
+    getStoredAgent(scope.threadId, scope.chatId);
   const keyboard = await buildAgentSelectionMenu(currentAgent);
 
   const text = currentAgent

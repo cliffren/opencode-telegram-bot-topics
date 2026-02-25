@@ -74,6 +74,8 @@ npm install -g @grinev/opencode-telegram-bot
 opencode-telegram start
 ```
 
+Global install also exposes `opencode-telegram-sendfile` for terminal/file-tool workflows.
+
 To reconfigure at any time:
 
 ```bash
@@ -100,11 +102,32 @@ opencode-telegram config
 | `/model`          | Choose a model from your favorites                      |
 | `/agent`          | Switch agent mode (Plan / Build)                        |
 | `/rename`         | Rename the current session                              |
+| `/screenshot`     | Capture current screen and send screenshot              |
 | `/opencode_start` | Start the OpenCode server remotely                      |
 | `/opencode_stop`  | Stop the OpenCode server remotely                       |
 | `/help`           | Show available commands                                 |
 
 Any regular text message is sent as a prompt to the coding agent only when no blocking interaction is active. Voice/audio messages are transcribed and then sent as prompts when STT is configured.
+
+Screenshot shortcut: in addition to `/screenshot`, natural requests like "帮我截屏发给我" / "take a screenshot and send it" are recognized and handled directly by the bot.
+
+File shortcut: natural requests like "把./artifacts/screenshot.png发送给我" / "send ./artifacts/screenshot.png to me" are recognized and sent directly (without requiring `/sendfile`).
+
+If multiple files match a fuzzy path, the bot shows inline buttons so you can choose the exact file before sending.
+
+Terminal shortcut: model/tools can queue file sending via shell command:
+
+- `opencode-telegram-sendfile ./artifacts/report.pdf`
+- `opencode-telegram-sendfile ./artifacts/report.pdf --chat-id 123456789 --thread-id 42`
+
+The bot polls queued requests and sends matching files to Telegram automatically.
+
+If you want the assistant to send files back to Telegram from its final reply, include one or more directives in the assistant output:
+
+- `[[SEND_FILE:/absolute/path/to/file]]`
+- `[[SEND_FILE:relative/path/from/current/project]]`
+
+The bot resolves file paths, enforces `CODE_FILE_MAX_SIZE_KB`, sends matching files as Telegram documents, and removes directives from the final text message.
 
 > `/opencode_start` and `/opencode_stop` are intended as emergency commands — for example, if you need to restart a stuck server while away from your computer. Under normal usage, start `opencode serve` yourself before launching the bot.
 
@@ -133,8 +156,10 @@ When installed via npm, the configuration wizard handles the initial setup. The 
 | `PROJECTS_LIST_LIMIT`           | Max projects shown in `/projects`                                                                            |    No    | `10`                     |
 | `SERVICE_MESSAGES_INTERVAL_SEC` | Service messages interval (thinking + tool calls); keep `>=2` to avoid Telegram rate limits, `0` = immediate |    No    | `5`                      |
 | `HIDE_THINKING_MESSAGES`        | Hide `💭 Thinking...` service messages                                                                       |    No    | `false`                  |
-| `HIDE_TOOL_CALL_MESSAGES`       | Hide tool-call service messages (`💻 bash ...`, `📖 read ...`, etc.)                                         |    No    | `false`                  |
+| `HIDE_TOOL_CALL_MESSAGES`       | Hide tool-call service messages (`💻 bash ...`, `📖 read ...`, etc.)                                         |    No    | `true`                   |
 | `CODE_FILE_MAX_SIZE_KB`         | Max file size (KB) to send as document                                                                       |    No    | `100`                    |
+| `SEND_FILE_REQUESTS_DIR`        | Custom queue directory for `opencode-telegram-sendfile` requests                                             |    No    | `<app_home>/run/sendfile-requests` |
+| `SEND_FILE_REQUEST_POLL_INTERVAL_MS` | Poll interval for queued send-file requests (milliseconds)                                              |    No    | `2000`                   |
 | `STT_API_URL`                   | Whisper-compatible API base URL (enables voice/audio transcription)                                          |    No    | —                        |
 | `STT_API_KEY`                   | API key for your STT provider                                                                                |    No    | —                        |
 | `STT_MODEL`                     | STT model name passed to `/audio/transcriptions`                                                             |    No    | `whisper-large-v3-turbo` |

@@ -4,11 +4,12 @@ import { getCurrentSession } from "../../session/manager.js";
 import { getCurrentProject } from "../../settings/manager.js";
 import { fetchCurrentAgent } from "../../agent/manager.js";
 import { getAgentDisplayName } from "../../agent/types.js";
-import { fetchCurrentModel } from "../../model/manager.js";
+import { fetchCurrentModelForScope } from "../../model/manager.js";
 import { formatModelForDisplay } from "../../model/types.js";
 import { processManager } from "../../process/manager.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
+import { getCurrentSessionByThread } from "../handlers/prompt.js";
 
 export async function statusCommand(ctx: CommandContext<Context>) {
   try {
@@ -37,14 +38,15 @@ export async function statusCommand(ctx: CommandContext<Context>) {
     }
 
     // Add agent mode information
-    const currentAgent = await fetchCurrentAgent();
+    const threadId = ctx.message?.message_thread_id ?? null;
+    const currentAgent = await fetchCurrentAgent(threadId, ctx.chat?.id ?? null);
     const agentDisplay = currentAgent
       ? getAgentDisplayName(currentAgent)
       : t("status.agent_not_set");
     message += `${t("status.line.mode", { mode: agentDisplay })}\n`;
 
     // Add model information
-    const currentModel = fetchCurrentModel();
+    const currentModel = fetchCurrentModelForScope(threadId, ctx.chat?.id ?? null);
     const modelDisplay = formatModelForDisplay(currentModel.providerID, currentModel.modelID);
     message += `${t("status.line.model", { model: modelDisplay })}\n`;
 
@@ -57,7 +59,7 @@ export async function statusCommand(ctx: CommandContext<Context>) {
       message += t("status.project_hint");
     }
 
-    const currentSession = getCurrentSession();
+    const currentSession = getCurrentSessionByThread(threadId, ctx.chat?.id ?? null) ?? getCurrentSession();
     if (currentSession) {
       message += `\n${t("status.session_selected", { title: currentSession.title })}\n`;
     } else {

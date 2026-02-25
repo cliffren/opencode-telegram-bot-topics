@@ -100,7 +100,7 @@ function countDiffChangesFromText(text: string): { additions: number; deletions:
 }
 
 class SummaryAggregator {
-  private currentSessionId: string | null = null;
+  private trackedSessionIds: Set<string> = new Set();
   private currentMessageParts: Map<string, string[]> = new Map();
   private pendingParts: Map<string, string[]> = new Map();
   private messages: Map<string, { role: string }> = new Map();
@@ -268,15 +268,16 @@ class SummaryAggregator {
   }
 
   setSession(sessionId: string): void {
-    if (this.currentSessionId !== sessionId) {
-      this.clear();
-      this.currentSessionId = sessionId;
-    }
+    this.trackedSessionIds.add(sessionId);
+  }
+
+  private isSessionTracked(sessionId: string): boolean {
+    return this.trackedSessionIds.size === 0 || this.trackedSessionIds.has(sessionId);
   }
 
   clear(): void {
     this.stopTypingIndicator();
-    this.currentSessionId = null;
+    this.trackedSessionIds.clear();
     this.currentMessageParts.clear();
     this.pendingParts.clear();
     this.messages.clear();
@@ -302,7 +303,7 @@ class SummaryAggregator {
   ): void {
     const { info } = event.properties;
 
-    if (info.sessionID !== this.currentSessionId) {
+    if (!this.isSessionTracked(info.sessionID)) {
       return;
     }
 
@@ -330,7 +331,7 @@ class SummaryAggregator {
         const lastPart = parts[parts.length - 1] || "";
 
         logger.debug(
-          `[Aggregator] Message part completed: messageId=${messageID}, textLength=${lastPart.length}, totalParts=${parts.length}, session=${this.currentSessionId}`,
+          `[Aggregator] Message part completed: messageId=${messageID}, textLength=${lastPart.length}, totalParts=${parts.length}, session=${info.sessionID}`,
         );
 
         // Extract and report tokens BEFORE onComplete so keyboard context is updated
@@ -359,7 +360,7 @@ class SummaryAggregator {
         }
 
         if (this.onCompleteCallback && lastPart.length > 0) {
-          this.onCompleteCallback(this.currentSessionId!, lastPart);
+          this.onCompleteCallback(info.sessionID, lastPart);
         }
 
         this.currentMessageParts.delete(messageID);
@@ -387,7 +388,7 @@ class SummaryAggregator {
   ): void {
     const { part } = event.properties;
 
-    if (part.sessionID !== this.currentSessionId) {
+    if (!this.isSessionTracked(part.sessionID)) {
       return;
     }
 
@@ -651,7 +652,7 @@ class SummaryAggregator {
   ): void {
     const { sessionID } = event.properties;
 
-    if (sessionID !== this.currentSessionId) {
+    if (!this.isSessionTracked(sessionID)) {
       return;
     }
   }
@@ -663,7 +664,7 @@ class SummaryAggregator {
   ): void {
     const { sessionID } = event.properties;
 
-    if (sessionID !== this.currentSessionId) {
+    if (!this.isSessionTracked(sessionID)) {
       return;
     }
 
@@ -681,7 +682,7 @@ class SummaryAggregator {
     const properties = event.properties as { sessionID: string };
     const { sessionID } = properties;
 
-    if (sessionID !== this.currentSessionId) {
+    if (!this.isSessionTracked(sessionID)) {
       return;
     }
 
@@ -712,7 +713,7 @@ class SummaryAggregator {
       };
     };
 
-    if (sessionID !== this.currentSessionId) {
+    if (!this.isSessionTracked(sessionID)) {
       return;
     }
 
@@ -737,10 +738,8 @@ class SummaryAggregator {
   ): void {
     const { id, sessionID, questions } = event.properties;
 
-    if (sessionID !== this.currentSessionId) {
-      logger.debug(
-        `[Aggregator] Ignoring question.asked for different session: ${sessionID} (current: ${this.currentSessionId})`,
-      );
+    if (!this.isSessionTracked(sessionID)) {
+      logger.debug(`[Aggregator] Ignoring question.asked for untracked session: ${sessionID}`);
       return;
     }
 
@@ -764,7 +763,7 @@ class SummaryAggregator {
       diff: Array<{ file: string; additions: number; deletions: number }>;
     };
 
-    if (properties.sessionID !== this.currentSessionId) {
+    if (!this.isSessionTracked(properties.sessionID)) {
       return;
     }
 
@@ -791,10 +790,8 @@ class SummaryAggregator {
   ): void {
     const request = event.properties;
 
-    if (request.sessionID !== this.currentSessionId) {
-      logger.debug(
-        `[Aggregator] Ignoring permission.asked for different session: ${request.sessionID} (current: ${this.currentSessionId})`,
-      );
+    if (!this.isSessionTracked(request.sessionID)) {
+      logger.debug(`[Aggregator] Ignoring permission.asked for untracked session: ${request.sessionID}`);
       return;
     }
 

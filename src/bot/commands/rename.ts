@@ -47,6 +47,8 @@ export async function renameCommand(ctx: CommandContext<Context>): Promise<void>
       metadata: {
         sessionId: currentSession.id,
         messageId: message.message_id,
+        interactionChatId: ctx.chat?.id,
+        interactionThreadId: ctx.message?.message_thread_id ?? null,
       },
     });
 

@@ -11,7 +11,7 @@ export interface AgentInfo {
 }
 
 /**
- * Agent emoji mapping for visual distinction
+ * Agent emoji mapping for visual distinction (oh-my-opencode agents + defaults)
  */
 export const AGENT_EMOJI: Record<string, string> = {
   plan: "📋",
@@ -21,20 +21,51 @@ export const AGENT_EMOJI: Record<string, string> = {
   title: "📝",
   summary: "📄",
   compaction: "📦",
+  sisyphus: "🔄",
+  hephaestus: "🔨",
+  oracle: "🔮",
+  librarian: "📚",
+  atlas: "🗺️",
+  prometheus: "🔥",
+  metis: "🦉",
+  momus: "🎭",
+  "multimodal-looker": "👁️",
+  "opencode-builder": "🛠️",
+  ultrawork: "⚡",
 };
+
+function fuzzyMatchAgent(agentName: string): string | undefined {
+  const lowerInput = agentName.toLowerCase();
+  for (const [key, emoji] of Object.entries(AGENT_EMOJI)) {
+    if (lowerInput.includes(key) || key.includes(lowerInput)) {
+      return emoji;
+    }
+  }
+  return undefined;
+}
 
 /**
  * Get emoji for agent (fallback to 🤖 if not found)
+ * Uses fuzzy matching to handle variants like "Sisyphus (Ultraworker)"
  */
 export function getAgentEmoji(agentName: string): string {
-  return AGENT_EMOJI[agentName] ?? "🤖";
+  const fuzzyEmoji = fuzzyMatchAgent(agentName);
+  return fuzzyEmoji ?? "🤖";
 }
 
 /**
  * Get display name for agent (with emoji)
+ * Extracts base agent name from full string like "Sisyphus (Ultraworker)"
  */
 export function getAgentDisplayName(agentName: string): string {
   const emoji = getAgentEmoji(agentName);
-  const capitalizedName = agentName.charAt(0).toUpperCase() + agentName.slice(1);
+  
+  // Extract base name: "Sisyphus (Ultraworker)" -> "Sisyphus"
+  const baseName = agentName
+    .replace(/\s*\(.*\)\s*/, "")
+    .replace(/_/g, " ")
+    .trim();
+  
+  const capitalizedName = baseName.charAt(0).toUpperCase() + baseName.slice(1);
   return `${emoji} ${capitalizedName} Mode`;
 }

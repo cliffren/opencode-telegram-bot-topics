@@ -32,8 +32,11 @@ export interface SessionDirectoryCacheInfo {
 export interface Settings {
   currentProject?: ProjectInfo;
   currentSession?: SessionInfo;
+  scopedSessions?: Record<string, SessionInfo>;
   currentAgent?: string;
+  scopedAgents?: Record<string, string>;
   currentModel?: ModelInfo;
+  scopedModels?: Record<string, ModelInfo>;
   pinnedMessageId?: number;
   serverProcess?: ServerProcessInfo;
   sessionDirectoryCache?: SessionDirectoryCacheInfo;
@@ -107,6 +110,30 @@ export function clearSession(): void {
   void writeSettingsFile(currentSettings);
 }
 
+export function getScopedSession(scopeKey: string): SessionInfo | undefined {
+  return currentSettings.scopedSessions?.[scopeKey];
+}
+
+export function setScopedSession(scopeKey: string, sessionInfo: SessionInfo): void {
+  const existing = currentSettings.scopedSessions ?? {};
+  currentSettings.scopedSessions = {
+    ...existing,
+    [scopeKey]: sessionInfo,
+  };
+  void writeSettingsFile(currentSettings);
+}
+
+export function clearScopedSession(scopeKey: string): void {
+  if (!currentSettings.scopedSessions || !(scopeKey in currentSettings.scopedSessions)) {
+    return;
+  }
+
+  const rest = { ...currentSettings.scopedSessions };
+  delete rest[scopeKey];
+  currentSettings.scopedSessions = rest;
+  void writeSettingsFile(currentSettings);
+}
+
 export function getCurrentAgent(): string | undefined {
   return currentSettings.currentAgent;
 }
@@ -121,6 +148,30 @@ export function clearCurrentAgent(): void {
   void writeSettingsFile(currentSettings);
 }
 
+export function getScopedAgent(scopeKey: string): string | undefined {
+  return currentSettings.scopedAgents?.[scopeKey];
+}
+
+export function setScopedAgent(scopeKey: string, agentName: string): void {
+  const existing = currentSettings.scopedAgents ?? {};
+  currentSettings.scopedAgents = {
+    ...existing,
+    [scopeKey]: agentName,
+  };
+  void writeSettingsFile(currentSettings);
+}
+
+export function clearScopedAgent(scopeKey: string): void {
+  if (!currentSettings.scopedAgents || !(scopeKey in currentSettings.scopedAgents)) {
+    return;
+  }
+
+  const rest = { ...currentSettings.scopedAgents };
+  delete rest[scopeKey];
+  currentSettings.scopedAgents = rest;
+  void writeSettingsFile(currentSettings);
+}
+
 export function getCurrentModel(): ModelInfo | undefined {
   return currentSettings.currentModel;
 }
@@ -132,6 +183,34 @@ export function setCurrentModel(modelInfo: ModelInfo): void {
 
 export function clearCurrentModel(): void {
   currentSettings.currentModel = undefined;
+  void writeSettingsFile(currentSettings);
+}
+
+export function getScopedModel(scopeKey: string): ModelInfo | undefined {
+  return currentSettings.scopedModels?.[scopeKey];
+}
+
+export function getAllScopedModels(): Record<string, ModelInfo> {
+  return { ...(currentSettings.scopedModels ?? {}) };
+}
+
+export function setScopedModel(scopeKey: string, modelInfo: ModelInfo): void {
+  const existing = currentSettings.scopedModels ?? {};
+  currentSettings.scopedModels = {
+    ...existing,
+    [scopeKey]: modelInfo,
+  };
+  void writeSettingsFile(currentSettings);
+}
+
+export function clearScopedModel(scopeKey: string): void {
+  if (!currentSettings.scopedModels || !(scopeKey in currentSettings.scopedModels)) {
+    return;
+  }
+
+  const rest = { ...currentSettings.scopedModels };
+  delete rest[scopeKey];
+  currentSettings.scopedModels = rest;
   void writeSettingsFile(currentSettings);
 }
 

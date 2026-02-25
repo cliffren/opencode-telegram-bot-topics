@@ -16,6 +16,7 @@ import {
   clearActiveInlineMenu,
   ensureActiveInlineMenu,
   replyWithInlineMenu,
+  resolveInlineInteractionScope,
 } from "./inline-menu.js";
 import { t } from "../../i18n/index.js";
 
@@ -39,6 +40,14 @@ export async function handleVariantSelect(ctx: Context): Promise<boolean> {
   logger.debug(`[VariantHandler] Received callback: ${callbackQuery.data}`);
 
   try {
+    const scope = resolveInlineInteractionScope(ctx);
+    const threadId = scope.threadId;
+    const chatId = scope.chatId;
+
+    logger.debug(
+      `[VariantHandler] Resolved selection scope: chatId=${chatId ?? "none"}, threadId=${threadId ?? "private"}`,
+    );
+
     if (ctx.chat) {
       keyboardManager.initialize(ctx.api, ctx.chat.id);
     }
@@ -51,7 +60,7 @@ export async function handleVariantSelect(ctx: Context): Promise<boolean> {
     const variantId = callbackQuery.data.replace("variant:", "");
 
     // Get current model
-    const currentModel = getStoredModel();
+    const currentModel = getStoredModel(threadId, chatId);
 
     if (!currentModel.providerID || !currentModel.modelID) {
       logger.error("[VariantHandler] No model selected");
@@ -60,17 +69,17 @@ export async function handleVariantSelect(ctx: Context): Promise<boolean> {
     }
 
     // Set variant
-    setCurrentVariant(variantId);
+    setCurrentVariant(variantId, threadId, chatId);
 
     // Re-read model after variant update
-    const updatedModel = getStoredModel();
+    const updatedModel = getStoredModel(threadId, chatId);
 
     // Update keyboard manager state
     keyboardManager.updateModel(updatedModel);
     keyboardManager.updateVariant(variantId);
 
     // Build keyboard with correct context info
-    const currentAgent = getStoredAgent();
+    const currentAgent = getStoredAgent(threadId, chatId);
     const contextInfo =
       pinnedMessageManager.getContextInfo() ??
       (pinnedMessageManager.getContextLimit() > 0
@@ -159,14 +168,16 @@ export async function buildVariantSelectionMenu(
  */
 export async function showVariantSelectionMenu(ctx: Context): Promise<void> {
   try {
-    const currentModel = getStoredModel();
+    const threadId = ctx.message?.message_thread_id ?? ctx.callbackQuery?.message?.message_thread_id ?? null;
+    const chatId = ctx.chat?.id ?? null;
+    const currentModel = getStoredModel(threadId, chatId);
 
     if (!currentModel.providerID || !currentModel.modelID) {
       await ctx.reply(t("variant.select_model_first"));
       return;
     }
 
-    const currentVariant = getCurrentVariant();
+    const currentVariant = getCurrentVariant(threadId, chatId);
     const keyboard = await buildVariantSelectionMenu(
       currentVariant,
       currentModel.providerID,

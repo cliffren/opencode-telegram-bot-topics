@@ -95,11 +95,11 @@ export const en = {
   "projects.selected":
     "✅ Project selected: {project}\n\n📋 Session was reset. Use /sessions or /new for this project.",
   "projects.select_error": "🔴 Failed to select project.",
-
   "sessions.project_not_selected":
     "🏗 Project is not selected.\n\nFirst select a project with /projects.",
   "sessions.empty": "📭 No sessions found.\n\nCreate a new session with /new.",
   "sessions.select": "Select a session:",
+  "sessions.select_sub": "Select a session (main or sub-session):",
   "sessions.fetch_error":
     "🔴 OpenCode Server is unavailable or an error occurred while loading sessions.",
   "sessions.select_project_first": "🔴 Project is not selected. Use /projects.",
@@ -287,6 +287,29 @@ export const en = {
   "rename.button.cancel": "❌ Cancel",
 
   "cmd.description.rename": "Rename current session",
+  "cmd.description.screenshot": "Capture and send a screenshot",
+  "cmd.description.sendfile": "Send a file to chat",
+
+  "sendfile.usage": "Usage: /sendfile <file_path>\n\nExample: /sendfile /path/to/image.png",
+  "sendfile.file_not_found": "🔴 File not found",
+  "sendfile.not_a_file": "🔴 Path is not a file",
+  "sendfile.too_large": "🔴 File too large: {size}KB (max {limit}KB)",
+  "sendfile.too_large_unknown": "🔴 File too large (max {limit}KB)",
+  "sendfile.error": "🔴 Failed to send file",
+  "sendfile.multiple_found": "📁 Found multiple matches for `{path}`. Choose a file:",
+  "sendfile.choice.cancel": "Cancel",
+  "sendfile.choice.cancelled": "❌ File selection cancelled.",
+  "sendfile.choice.expired": "Selection expired. Please request file again.",
+  "sendfile.choice.sent": "✅ Sent: `{path}`",
+  "sendfile.choice.failed": "🔴 Failed to send selected file for `{path}`",
+
+  "screenshot.capturing": "📸 Capturing screenshot...",
+  "screenshot.sent": "✅ Screenshot captured and sent\n`{path}`",
+  "screenshot.failed":
+    "🔴 Failed to capture screenshot. Please grant Screen Recording permission and try again.",
+  "screenshot.failed_thread":
+    "🔴 Failed to send screenshot to this topic (message thread not found). Please retry directly in that topic.",
+  "screenshot.unsupported": "⚠️ Screenshot capture is currently supported on macOS only.",
 
   "cli.usage":
     "Usage:\n  opencode-telegram [start] [--mode sources|installed]\n  opencode-telegram status\n  opencode-telegram stop\n  opencode-telegram config\n\nNotes:\n  - No command defaults to `start`\n  - `--mode` is currently supported for `start` only",
@@ -315,6 +338,12 @@ export const en = {
     "🎤 Voice recognition is not configured.\n\nSet STT_API_URL and STT_API_KEY in .env to enable it.",
   "stt.error": "🔴 Failed to recognize audio: {error}",
   "stt.empty_result": "🎤 No speech detected in the audio message.",
+
+  "image.downloading": "📥 Downloading image...",
+  "image.download_failed": "🔴 Failed to download image",
+  "image.sending_to_opencode": "🤖 Sending to OpenCode...",
+  "image.sent": "✅ Image sent to OpenCode",
+  "image.error": "🔴 Failed to process image: {error}",
 } as const;
 
 export type I18nKey = keyof typeof en;

@@ -87,7 +87,8 @@ export async function handleCompactConfirm(ctx: Context): Promise<boolean> {
     // Show typing indicator
     await ctx.api.sendChatAction(ctx.chat!.id, "typing");
 
-    const storedModel = getStoredModel();
+    const threadId = ctx.callbackQuery?.message?.message_thread_id ?? null;
+    const storedModel = getStoredModel(threadId, ctx.chat?.id ?? null);
 
     logger.debug(
       `[ContextHandler] Calling summarize with sessionID=${session.id}, directory=${session.directory}, model=${storedModel.providerID}/${storedModel.modelID}`,

@@ -20,8 +20,9 @@ export async function startCommand(ctx: Context): Promise<void> {
   }
 
   // Get current agent, model, and context
-  const currentAgent = getStoredAgent();
-  const currentModel = getStoredModel();
+  const threadId = ctx.message?.message_thread_id ?? null;
+  const currentAgent = getStoredAgent(threadId, ctx.chat?.id ?? null);
+  const currentModel = getStoredModel(threadId, ctx.chat?.id ?? null);
   const variantName = formatVariantForButton(currentModel.variant || "default");
   const contextInfo =
     pinnedMessageManager.getContextInfo() ??

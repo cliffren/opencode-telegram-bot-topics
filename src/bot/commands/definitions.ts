@@ -29,6 +29,8 @@ const COMMAND_DEFINITIONS: BotCommandI18nDefinition[] = [
   { command: "model", descriptionKey: "cmd.description.model" },
   { command: "agent", descriptionKey: "cmd.description.agent" },
   { command: "rename", descriptionKey: "cmd.description.rename" },
+  { command: "screenshot", descriptionKey: "cmd.description.screenshot" },
+  { command: "sendfile", descriptionKey: "cmd.description.sendfile" },
   { command: "opencode_start", descriptionKey: "cmd.description.opencode_start" },
   { command: "opencode_stop", descriptionKey: "cmd.description.opencode_stop" },
   { command: "help", descriptionKey: "cmd.description.help" },

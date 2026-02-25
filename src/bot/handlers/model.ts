@@ -1,5 +1,9 @@
 import { Context, InlineKeyboard } from "grammy";
-import { selectModel, getFavoriteModels, fetchCurrentModel } from "../../model/manager.js";
+import {
+  selectModelForScope,
+  getFavoriteModels,
+  fetchCurrentModelForScope,
+} from "../../model/manager.js";
 import { formatModelForDisplay } from "../../model/types.js";
 import type { ModelInfo } from "../../model/types.js";
 import { formatVariantForButton } from "../../variant/manager.js";
@@ -12,6 +16,7 @@ import {
   clearActiveInlineMenu,
   ensureActiveInlineMenu,
   replyWithInlineMenu,
+  resolveInlineInteractionScope,
 } from "./inline-menu.js";
 import { t } from "../../i18n/index.js";
 
@@ -58,7 +63,15 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
     };
 
     // Select model and persist
-    selectModel(modelInfo);
+    const scope = resolveInlineInteractionScope(ctx);
+    const threadId = scope.threadId;
+    const chatId = scope.chatId;
+
+    logger.debug(
+      `[ModelHandler] Resolved selection scope: chatId=${chatId ?? "none"}, threadId=${threadId ?? "private"}`,
+    );
+
+    selectModelForScope(modelInfo, threadId, chatId);
 
     // Update keyboard manager state (may not be initialized if no session selected)
     keyboardManager.updateModel(modelInfo);
@@ -67,7 +80,7 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
     await pinnedMessageManager.refreshContextLimit();
 
     // Update Reply Keyboard with new model and context
-    const currentAgent = getStoredAgent();
+    const currentAgent = getStoredAgent(threadId, chatId);
     const contextInfo =
       pinnedMessageManager.getContextInfo() ??
       (pinnedMessageManager.getContextLimit() > 0
@@ -144,7 +157,9 @@ export async function buildModelSelectionMenu(currentModel?: ModelInfo): Promise
  */
 export async function showModelSelectionMenu(ctx: Context): Promise<void> {
   try {
-    const currentModel = fetchCurrentModel();
+    const threadId = ctx.message?.message_thread_id ?? ctx.callbackQuery?.message?.message_thread_id ?? null;
+    const chatId = ctx.chat?.id ?? null;
+    const currentModel = fetchCurrentModelForScope(threadId, chatId);
     const keyboard = await buildModelSelectionMenu(currentModel);
 
     if (keyboard.inline_keyboard.length === 0) {

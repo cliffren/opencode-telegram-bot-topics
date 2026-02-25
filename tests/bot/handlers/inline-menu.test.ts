@@ -6,12 +6,14 @@ import {
   ensureActiveInlineMenu,
   handleInlineMenuCancel,
   replyWithInlineMenu,
+  resolveInlineInteractionScope,
 } from "../../../src/bot/handlers/inline-menu.js";
 import { t } from "../../../src/i18n/index.js";
 
 function createReplyContext(messageId: number = 1): Context {
   return {
     chat: { id: 100 },
+    message: { message_thread_id: 777 },
     reply: vi.fn().mockResolvedValue({ message_id: messageId }),
     answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
     deleteMessage: vi.fn().mockResolvedValue(undefined),
@@ -90,6 +92,26 @@ describe("bot/handlers/inline-menu", () => {
     expect(state?.expectedInput).toBe("callback");
     expect(state?.metadata.menuKind).toBe("model");
     expect(state?.metadata.messageId).toBe(42);
+    expect(state?.metadata.interactionThreadId).toBe(777);
+  });
+
+  it("resolves callback scope from interaction metadata when callback has no thread id", () => {
+    interactionManager.start({
+      kind: "inline",
+      expectedInput: "callback",
+      metadata: {
+        menuKind: "model",
+        messageId: 1,
+        interactionChatId: 100,
+        interactionThreadId: 888,
+      },
+    });
+
+    const ctx = createCallbackContext("model:openai:gpt-5", 1);
+    const scope = resolveInlineInteractionScope(ctx);
+
+    expect(scope.chatId).toBe(100);
+    expect(scope.threadId).toBe(888);
   });
 
   it("accepts callback from active inline menu", async () => {

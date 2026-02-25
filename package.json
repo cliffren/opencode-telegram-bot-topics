@@ -5,7 +5,8 @@
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "opencode-telegram": "dist/cli.js"
+    "opencode-telegram": "dist/cli.js",
+    "opencode-telegram-sendfile": "dist/tools/sendfile-request-cli.js"
   },
   "exports": {
     ".": "./dist/index.js",

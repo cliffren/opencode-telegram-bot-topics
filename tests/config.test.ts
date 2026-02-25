@@ -14,14 +14,14 @@ describe("config boolean env parsing", () => {
     vi.stubEnv("OPENCODE_MODEL_ID", "test-model");
   });
 
-  it("uses false defaults for hide service message flags", async () => {
+  it("uses expected defaults for hide service message flags", async () => {
     vi.stubEnv("HIDE_THINKING_MESSAGES", "");
     vi.stubEnv("HIDE_TOOL_CALL_MESSAGES", "");
 
     const config = await loadConfig();
 
     expect(config.bot.hideThinkingMessages).toBe(false);
-    expect(config.bot.hideToolCallMessages).toBe(false);
+    expect(config.bot.hideToolCallMessages).toBe(true);
   });
 
   it("parses truthy values for hide service message flags", async () => {
@@ -51,6 +51,6 @@ describe("config boolean env parsing", () => {
     const config = await loadConfig();
 
     expect(config.bot.hideThinkingMessages).toBe(false);
-    expect(config.bot.hideToolCallMessages).toBe(false);
+    expect(config.bot.hideToolCallMessages).toBe(true);
   });
 });

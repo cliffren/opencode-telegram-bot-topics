@@ -16,6 +16,11 @@ interface ActiveInlineMenuMetadata {
   messageId: number;
 }
 
+export interface InlineInteractionScope {
+  chatId: number | null;
+  threadId: number | null;
+}
+
 interface InlineMenuReplyOptions {
   menuKind: InlineMenuKind;
   text: string;
@@ -35,6 +40,48 @@ function getCallbackMessageId(ctx: Context): number | null {
 
   const messageId = (message as { message_id?: number }).message_id;
   return typeof messageId === "number" ? messageId : null;
+}
+
+function getCallbackThreadId(ctx: Context): number | null {
+  const message = ctx.callbackQuery?.message;
+  if (!message || !("message_thread_id" in message)) {
+    return null;
+  }
+
+  const threadId = (message as { message_thread_id?: number }).message_thread_id;
+  return typeof threadId === "number" ? threadId : null;
+}
+
+export function resolveInlineInteractionScope(ctx: Context): InlineInteractionScope {
+  const state = interactionManager.getSnapshot();
+  const metadata = state?.kind === "inline" ? state.metadata : null;
+
+  const messageThreadId = ctx.message?.message_thread_id ?? null;
+  const callbackThreadId = getCallbackThreadId(ctx);
+
+  let chatId = ctx.chat?.id ?? null;
+  let threadId = messageThreadId ?? callbackThreadId;
+
+  if (metadata) {
+    const metadataChatId = metadata.interactionChatId;
+    const metadataThreadId = metadata.interactionThreadId;
+
+    if (chatId === null && typeof metadataChatId === "number") {
+      chatId = metadataChatId;
+    }
+
+    if (
+      threadId === null &&
+      (typeof metadataThreadId === "number" || metadataThreadId === null)
+    ) {
+      threadId = metadataThreadId;
+    }
+  }
+
+  return {
+    chatId,
+    threadId,
+  };
 }
 
 function getActiveInlineMenuMetadata(
@@ -102,12 +149,16 @@ export async function replyWithInlineMenu(
 
   const message = await ctx.reply(options.text, replyOptions);
 
+  const scope = resolveInlineInteractionScope(ctx);
+
   interactionManager.start({
     kind: "inline",
     expectedInput: "callback",
     metadata: {
       menuKind: options.menuKind,
       messageId: message.message_id,
+      interactionChatId: scope.chatId,
+      interactionThreadId: scope.threadId,
     },
   });
 

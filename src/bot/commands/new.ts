@@ -11,6 +11,7 @@ import { getStoredAgent } from "../../agent/manager.js";
 import { getStoredModel } from "../../model/manager.js";
 import { formatVariantForButton } from "../../variant/manager.js";
 import { createMainKeyboard } from "../utils/keyboard.js";
+import { setCurrentSessionByThread } from "../handlers/prompt.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 
@@ -43,12 +44,17 @@ export async function newCommand(ctx: CommandContext<Context>) {
       directory: currentProject.worktree,
     };
     setCurrentSession(sessionInfo);
+
+    const threadId = ctx.message?.message_thread_id ?? null;
+    logger.info(`[New] Binding new session to threadId=${threadId ?? "none"}`);
+    setCurrentSessionByThread(threadId, ctx.chat?.id ?? null);
+
     summaryAggregator.clear();
     clearAllInteractionState("session_created");
     await ingestSessionInfoForCache(session);
 
     // Initialize pinned message manager and create pinned message
-    if (!pinnedMessageManager.isInitialized()) {
+    if (!pinnedMessageManager.isInitialized() || pinnedMessageManager.getState().chatId !== ctx.chat.id) {
       pinnedMessageManager.initialize(ctx.api, ctx.chat.id);
     }
 
@@ -62,8 +68,8 @@ export async function newCommand(ctx: CommandContext<Context>) {
     }
 
     // Get current state for keyboard
-    const currentAgent = getStoredAgent();
-    const currentModel = getStoredModel();
+    const currentAgent = getStoredAgent(threadId, ctx.chat?.id ?? null);
+    const currentModel = getStoredModel(threadId, ctx.chat?.id ?? null);
     const contextInfo = pinnedMessageManager.getContextInfo();
     const variantName = formatVariantForButton(currentModel.variant || "default");
     const keyboard = createMainKeyboard(

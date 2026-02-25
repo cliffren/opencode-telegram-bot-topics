@@ -8,10 +8,92 @@ import { summaryAggregator } from "../../summary/aggregator.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
 import { keyboardManager } from "../../keyboard/manager.js";
 import { ensureActiveInlineMenu, replyWithInlineMenu } from "../handlers/inline-menu.js";
+import { setCurrentSessionByThread } from "../handlers/prompt.js";
 import { logger } from "../../utils/logger.js";
 import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { config } from "../../config.js";
 import { getLocale, t } from "../../i18n/index.js";
+
+interface SessionWithChildren {
+  id: string;
+  title: string;
+  directory: string;
+  parentID?: string;
+  time: { created: number };
+  children?: SessionWithChildren[];
+}
+
+function isMessageNotModifiedError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("message is not modified");
+}
+
+function buildSessionTree(sessions: SessionWithChildren[]): SessionWithChildren[] {
+  const sessionMap = new Map<string, SessionWithChildren>();
+  const rootSessions: SessionWithChildren[] = [];
+
+  sessions.forEach((session) => {
+    sessionMap.set(session.id, { ...session, children: [] });
+  });
+
+  sessions.forEach((session) => {
+    const sessionWithChildren = sessionMap.get(session.id)!;
+    if (session.parentID && sessionMap.has(session.parentID)) {
+      const parent = sessionMap.get(session.parentID)!;
+      parent.children = parent.children || [];
+      parent.children.push(sessionWithChildren);
+    } else {
+      rootSessions.push(sessionWithChildren);
+    }
+  });
+
+  return rootSessions;
+}
+
+function buildRootSessionMenu(
+  rootSessions: SessionWithChildren[],
+  threadToken: string,
+  localeForDate: string,
+): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+
+  rootSessions.forEach((session, index) => {
+    const date = new Date(session.time.created).toLocaleDateString(localeForDate);
+    const hasChildren = session.children && session.children.length > 0;
+    const childIndicator = hasChildren ? " ▶" : "";
+    const label = `${index + 1}. ${session.title} (${date})${childIndicator}`;
+
+    if (hasChildren) {
+      keyboard.text(label, `session:${threadToken}:h:${index}`).row();
+    } else {
+      keyboard.text(label, `session:${threadToken}:r:${index}`).row();
+    }
+  });
+
+  return keyboard;
+}
+
+function buildSubSessionMenu(
+  mainSession: SessionWithChildren,
+  rootIndex: number,
+  threadToken: string,
+  localeForDate: string,
+): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+
+  const mainDate = new Date(mainSession.time.created).toLocaleDateString(localeForDate);
+  const mainLabel = `[main] ${mainSession.title} (${mainDate})`;
+  keyboard.text(mainLabel, `session:${threadToken}:m:${rootIndex}`).row();
+
+  if (mainSession.children && mainSession.children.length > 0) {
+    mainSession.children.forEach((child, childIndex) => {
+      const date = new Date(child.time.created).toLocaleDateString(localeForDate);
+      const label = `${childIndex + 1}. ${child.title} (${date})`;
+      keyboard.text(label, `session:${threadToken}:c:${rootIndex}:${childIndex}`).row();
+    });
+  }
+
+  return keyboard;
+}
 
 export async function sessionsCommand(ctx: CommandContext<Context>) {
   try {
@@ -44,14 +126,13 @@ export async function sessionsCommand(ctx: CommandContext<Context>) {
       return;
     }
 
-    const keyboard = new InlineKeyboard();
     const localeForDate = getLocale() === "ru" ? "ru-RU" : "en-US";
 
-    sessions.forEach((session, index) => {
-      const date = new Date(session.time.created).toLocaleDateString(localeForDate);
-      const label = `${index + 1}. ${session.title} (${date})`;
-      keyboard.text(label, `session:${session.id}`).row();
-    });
+    const currentThreadId = ctx.message?.message_thread_id ?? null;
+    const threadToken = currentThreadId === null ? "none" : String(currentThreadId);
+
+    const rootSessions = buildSessionTree(sessions as SessionWithChildren[]);
+    const keyboard = buildRootSessionMenu(rootSessions, threadToken, localeForDate);
 
     await replyWithInlineMenu(ctx, {
       menuKind: "session",
@@ -70,7 +151,55 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
     return false;
   }
 
-  const sessionId = callbackQuery.data.replace("session:", "");
+  const payload = callbackQuery.data.replace("session:", "");
+  const payloadParts = payload.split(":");
+
+  let sessionId = payload;
+  let callbackThreadId: number | null = null;
+  let action: string | undefined;
+  let childSessionId: string | undefined;
+  let compactAction: "r" | "h" | "m" | "c" | null = null;
+  let compactRootIndex: number | null = null;
+  let compactChildIndex: number | null = null;
+
+  const looksLikeThreadToken = payloadParts[0] === "none" || /^\d+$/.test(payloadParts[0] ?? "");
+
+  if (looksLikeThreadToken && payloadParts.length >= 2) {
+    const threadToken = payloadParts[0];
+    callbackThreadId = threadToken === "none" ? null : Number.parseInt(threadToken, 10);
+    if (Number.isNaN(callbackThreadId as number)) {
+      callbackThreadId = null;
+    }
+
+    const maybeCompactAction = payloadParts[1];
+    const maybeCompactRootIndex = payloadParts[2];
+    const parsedRootIndex =
+      maybeCompactRootIndex !== undefined ? Number.parseInt(maybeCompactRootIndex, 10) : Number.NaN;
+    const parsedChildIndex =
+      payloadParts[3] !== undefined ? Number.parseInt(payloadParts[3], 10) : Number.NaN;
+
+    if (
+      (maybeCompactAction === "r" || maybeCompactAction === "h" || maybeCompactAction === "m") &&
+      Number.isFinite(parsedRootIndex)
+    ) {
+      compactAction = maybeCompactAction;
+      compactRootIndex = parsedRootIndex;
+    } else if (
+      maybeCompactAction === "c" &&
+      Number.isFinite(parsedRootIndex) &&
+      Number.isFinite(parsedChildIndex)
+    ) {
+      compactAction = "c";
+      compactRootIndex = parsedRootIndex;
+      compactChildIndex = parsedChildIndex;
+    } else {
+      sessionId = payloadParts[1] ?? "";
+      action = payloadParts[2];
+      if (action === "child") {
+        childSessionId = payloadParts[3];
+      }
+    }
+  }
 
   const isActiveMenu = await ensureActiveInlineMenu(ctx, "session");
   if (!isActiveMenu) {
@@ -87,25 +216,196 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
       return true;
     }
 
-    const { data: session, error } = await opencodeClient.session.get({
-      sessionID: sessionId,
-      directory: currentProject.worktree,
-    });
+    const threadToken = callbackThreadId === null ? "none" : String(callbackThreadId);
+    const localeForDate = getLocale() === "ru" ? "ru-RU" : "en-US";
 
-    if (error || !session) {
-      throw error || new Error("Failed to get session details");
+    let selectedSession: SessionWithChildren;
+
+    if (compactAction !== null && compactRootIndex !== null) {
+      const { data: allSessions, error: listError } = await opencodeClient.session.list({
+        directory: currentProject.worktree,
+        limit: config.bot.sessionsListLimit,
+      });
+
+      if (listError || !allSessions) {
+        throw listError || new Error("Failed to list sessions for compact callback");
+      }
+
+      const rootSessions = buildSessionTree(allSessions as SessionWithChildren[]);
+      const mainSession = rootSessions[compactRootIndex];
+
+      if (!mainSession) {
+        throw new Error(`Invalid root session index: ${compactRootIndex}`);
+      }
+
+      if (compactAction === "h") {
+        const subMenuKeyboard = buildSubSessionMenu(
+          mainSession,
+          compactRootIndex,
+          threadToken,
+          localeForDate,
+        );
+        try {
+          await ctx.editMessageText(t("sessions.select_sub"), {
+            reply_markup: subMenuKeyboard,
+          });
+        } catch (error) {
+          if (!isMessageNotModifiedError(error)) {
+            throw error;
+          }
+          await ctx.answerCallbackQuery();
+        }
+        return true;
+      }
+
+      if (compactAction === "c") {
+        if (compactChildIndex === null) {
+          throw new Error("Child index is missing for compact child callback");
+        }
+
+        const childSession = mainSession.children?.[compactChildIndex];
+        if (!childSession) {
+          throw new Error(
+            `Invalid child session index: root=${compactRootIndex}, child=${compactChildIndex}`,
+          );
+        }
+        selectedSession = childSession;
+      } else {
+        selectedSession = mainSession;
+      }
+    } else {
+      const { data: session, error } = await opencodeClient.session.get({
+        sessionID: sessionId,
+        directory: currentProject.worktree,
+      });
+
+      if (error || !session) {
+        throw error || new Error("Failed to get session details");
+      }
+
+      selectedSession = {
+        id: session.id,
+        title: session.title,
+        directory: session.directory,
+        parentID: session.parentID,
+        time: session.time,
+      };
+    }
+
+    if (action === "children") {
+      const mainSessionWithChildren: SessionWithChildren = {
+        id: selectedSession.id,
+        title: selectedSession.title,
+        directory: selectedSession.directory,
+        parentID: selectedSession.parentID,
+        time: selectedSession.time,
+        children: [],
+      };
+      let mainSessionIndex = 0;
+
+      const { data: allSessions } = await opencodeClient.session.list({
+        directory: currentProject.worktree,
+        limit: config.bot.sessionsListLimit,
+      });
+
+      if (allSessions) {
+        const rootSessions = buildSessionTree(allSessions as SessionWithChildren[]);
+        const foundIndex = rootSessions.findIndex((s) => s.id === selectedSession.id);
+        if (foundIndex >= 0) {
+          mainSessionIndex = foundIndex;
+          mainSessionWithChildren.children = rootSessions[foundIndex]?.children;
+        }
+      }
+
+      const subMenuKeyboard = buildSubSessionMenu(
+        mainSessionWithChildren,
+        mainSessionIndex,
+        threadToken,
+        localeForDate,
+      );
+      try {
+        await ctx.editMessageText(t("sessions.select_sub"), {
+          reply_markup: subMenuKeyboard,
+        });
+      } catch (error) {
+        if (!isMessageNotModifiedError(error)) {
+          throw error;
+        }
+        await ctx.answerCallbackQuery();
+      }
+      return true;
+    }
+
+    if (action === "main") {
+      childSessionId = selectedSession.id;
+    }
+
+    if (action === "child" && childSessionId) {
+      const { data: childSession, error: childError } = await opencodeClient.session.get({
+        sessionID: childSessionId,
+        directory: currentProject.worktree,
+      });
+
+      if (childError || !childSession) {
+        throw childError || new Error("Failed to get child session details");
+      }
+
+      selectedSession = {
+        id: childSession.id,
+        title: childSession.title,
+        directory: childSession.directory,
+        parentID: childSession.parentID,
+        time: childSession.time,
+      };
+    }
+
+    if (!childSessionId && action !== "children" && compactAction !== "m" && compactAction !== "c") {
+      const { data: allSessions } = await opencodeClient.session.list({
+        directory: currentProject.worktree,
+        limit: config.bot.sessionsListLimit,
+      });
+
+      if (allSessions) {
+        const rootSessions = buildSessionTree(allSessions as SessionWithChildren[]);
+        const mainSession = rootSessions.find((s) => s.id === selectedSession.id);
+        if (mainSession && mainSession.children && mainSession.children.length > 0) {
+          const mainSessionIndex = rootSessions.findIndex((s) => s.id === selectedSession.id);
+          const subMenuKeyboard = buildSubSessionMenu(
+            mainSession,
+            mainSessionIndex >= 0 ? mainSessionIndex : 0,
+            threadToken,
+            localeForDate,
+          );
+          try {
+            await ctx.editMessageText(t("sessions.select_sub"), {
+              reply_markup: subMenuKeyboard,
+            });
+          } catch (error) {
+            if (!isMessageNotModifiedError(error)) {
+              throw error;
+            }
+            await ctx.answerCallbackQuery();
+          }
+          return true;
+        }
+      }
     }
 
     logger.info(
-      `[Bot] Session selected: id=${session.id}, title="${session.title}", project=${currentProject.worktree}`,
+      `[Bot] Session selected: id=${selectedSession.id}, title="${selectedSession.title}", project=${currentProject.worktree}`,
     );
 
     const sessionInfo: SessionInfo = {
-      id: session.id,
-      title: session.title,
+      id: selectedSession.id,
+      title: selectedSession.title,
       directory: currentProject.worktree,
     };
     setCurrentSession(sessionInfo);
+
+    const threadId = callbackThreadId ?? ctx.callbackQuery?.message?.message_thread_id ?? null;
+    logger.info(`[Sessions] Binding selected session to threadId=${threadId ?? "none"}`);
+    setCurrentSessionByThread(threadId, ctx.chat?.id ?? null);
+
     summaryAggregator.clear();
     clearAllInteractionState("session_switched");
 
@@ -117,6 +417,7 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
         const loadingMessage = await ctx.api.sendMessage(
           ctx.chat.id,
           t("sessions.loading_context"),
+          { message_thread_id: threadId ?? undefined },
         );
         loadingMessageId = loadingMessage.message_id;
       } catch (err) {
@@ -136,10 +437,10 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
 
     try {
       // Create new pinned message for this session
-      await pinnedMessageManager.onSessionChange(session.id, session.title);
+      await pinnedMessageManager.onSessionChange(selectedSession.id, selectedSession.title);
       // Load context from session history (for existing sessions)
       // Wait for it to complete so keyboard has correct context
-      await pinnedMessageManager.loadContextFromHistory(session.id, currentProject.worktree);
+      await pinnedMessageManager.loadContextFromHistory(selectedSession.id, currentProject.worktree);
     } catch (err) {
       logger.error("[Bot] Error initializing pinned message:", err);
     }
@@ -165,9 +466,10 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
       // Send session selection confirmation with updated keyboard
       const keyboard = keyboardManager.getKeyboard();
       try {
-        await ctx.api.sendMessage(chatId, t("sessions.selected", { title: session.title }), {
-          reply_markup: keyboard,
-        });
+          await ctx.api.sendMessage(chatId, t("sessions.selected", { title: selectedSession.title }), {
+            reply_markup: keyboard,
+            message_thread_id: threadId ?? undefined,
+          });
       } catch (err) {
         logger.error("[Sessions] Failed to send selection message:", err);
       }
@@ -180,9 +482,10 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
             ctx.api,
             chatId,
             null,
-            session.title,
-            session.id,
+            selectedSession.title,
+            selectedSession.id,
             currentProject.worktree,
+            threadId,
           ),
       });
     }
@@ -307,6 +610,7 @@ async function sendSessionPreview(
   sessionTitle: string,
   sessionId: string,
   directory: string,
+  messageThreadId: number | null,
 ): Promise<void> {
   const previewItems = await loadSessionPreview(sessionId, directory);
   const finalText = formatSessionPreview(sessionTitle, previewItems);
@@ -321,7 +625,7 @@ async function sendSessionPreview(
   }
 
   try {
-    await api.sendMessage(chatId, finalText);
+    await api.sendMessage(chatId, finalText, { message_thread_id: messageThreadId ?? undefined });
   } catch (err) {
     logger.error("[Sessions] Failed to send session preview message:", err);
   }

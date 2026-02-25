@@ -1,7 +1,7 @@
-import { Bot, Context, InputFile, NextFunction } from "grammy";
+import { Bot, Context, InlineKeyboard, InputFile, NextFunction } from "grammy";
 import { promises as fs } from "fs";
 import * as path from "path";
-import { fileURLToPath } from "url";
+import * as os from "os";
 import { SocksProxyAgent } from "socks-proxy-agent";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { config } from "../config.js";
@@ -22,6 +22,13 @@ import { opencodeStopCommand } from "./commands/opencode-stop.js";
 import { handleAgentCommand } from "./commands/agent.js";
 import { handleModelCommand } from "./commands/model.js";
 import { renameCommand, handleRenameCancel, handleRenameTextAnswer } from "./commands/rename.js";
+import {
+  findFileCandidatesForRequest,
+  sendfileCommand,
+  sendFileByApi,
+} from "./commands/sendfile.js";
+import { captureAndSendScreenshot, isScreenshotRequestText, screenshotCommand } from "./commands/screenshot.js";
+import { processExternalSendFileRequests } from "./external/sendfile-requests.js";
 import {
   handleQuestionCallback,
   showCurrentQuestion,
@@ -48,16 +55,387 @@ import { safeBackgroundTask } from "../utils/safe-background-task.js";
 import { pinnedMessageManager } from "../pinned/manager.js";
 import { t } from "../i18n/index.js";
 import { processUserPrompt } from "./handlers/prompt.js";
+import { getCurrentSessionByThread } from "./handlers/prompt.js";
 import { handleVoiceMessage } from "./handlers/voice.js";
+import { handleImageMessage } from "./handlers/image.js";
 
 let botInstance: Bot<Context> | null = null;
 let chatIdInstance: number | null = null;
+let threadIdInstance: number | null = null;
 let commandsInitialized = false;
 
+type SessionRouteContext = {
+  chatId: number;
+  threadId: number | null;
+  directory: string;
+};
+
+const sessionRouteContextBySessionId = new Map<string, SessionRouteContext>();
+
+function bindSessionRouteContext(sessionId: string, context: SessionRouteContext): void {
+  sessionRouteContextBySessionId.set(sessionId, context);
+}
+
+function getSessionRouteContext(sessionId: string): SessionRouteContext | null {
+  return sessionRouteContextBySessionId.get(sessionId) ?? null;
+}
+
+function syncThreadRouteContext(ctx: Context): void {
+  const threadId = getThreadId(ctx);
+  const session = getCurrentSessionByThread(threadId, ctx.chat?.id ?? null);
+  if (!session || !ctx.chat) {
+    return;
+  }
+
+  bindSessionRouteContext(session.id, {
+    chatId: ctx.chat.id,
+    threadId,
+    directory: session.directory,
+  });
+}
+
+function getThreadId(ctx: Context): number | null {
+  return ctx.message?.message_thread_id ?? null;
+}
+
 const TELEGRAM_DOCUMENT_CAPTION_MAX_LENGTH = 1024;
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const TEMP_DIR = path.join(__dirname, "..", ".tmp");
+const SEND_FILE_DIRECTIVE_REGEX = /\[\[SEND_FILE:\s*([^\]]+?)\s*\]\]/g;
+const SEND_FILE_INLINE_COMMAND_REGEX = /`\s*\/sendfile\s+([^`]+?)\s*`/gi;
+const SEND_FILE_LINE_COMMAND_REGEX = /^\s*\/?sendfile\s+(.+?)\s*$/i;
+const FILE_PATH_IN_BACKTICKS_REGEX = /`([^`]+\.[a-z0-9]{1,8})`/gi;
+const FILE_PATH_GENERIC_REGEX = /(?:\.{1,2}\/|\/)[^\s"'`，。；;]+\.[a-z0-9]{1,8}/gi;
+const AUTO_SEND_SIGNAL_REGEX = /(已发送|已经发送|发送给你|发给你|send(?:ing)?\s+(?:it|file)?\s*to\s+you|downloaded|saved|已下载|已保存|保存到|generated|已生成)/i;
+const MAX_AUTO_FILES_PER_MESSAGE = 3;
+const SEND_FILE_SELECTION_PREFIX = "sendfile_select:";
+const SEND_FILE_SELECTION_CANCEL_PREFIX = "sendfile_cancel:";
+const SEND_FILE_SELECTION_TTL_MS = 5 * 60_000;
+const SEND_FILE_SELECTION_MAX_CANDIDATES = 5;
+const TEMP_DIR = config.files.tempDir || path.join(os.tmpdir(), "opencode-telegram");
+
+type PendingSendFileSelection = {
+  chatId: number;
+  threadId: number | null;
+  requestedPath: string;
+  candidates: string[];
+  createdAt: number;
+};
+
+const pendingSendFileSelections = new Map<string, PendingSendFileSelection>();
+
+type SendFileDirectiveParseResult = {
+  sanitizedText: string;
+  filePaths: string[];
+};
+
+function parseSendFileDirectives(text: string): SendFileDirectiveParseResult {
+  const filePaths: string[] = [];
+
+  const withDirectiveMarkersRemoved = text.replace(
+    SEND_FILE_DIRECTIVE_REGEX,
+    (_fullMatch: string, rawPath: string) => {
+      const trimmedPath = rawPath.trim();
+      if (trimmedPath) {
+        filePaths.push(trimmedPath);
+      }
+      return "";
+    },
+  );
+
+  const withInlineCommandsRemoved = withDirectiveMarkersRemoved.replace(
+    SEND_FILE_INLINE_COMMAND_REGEX,
+    (_fullMatch: string, rawPath: string) => {
+      const trimmedPath = rawPath.trim();
+      if (trimmedPath) {
+        filePaths.push(trimmedPath);
+      }
+      return "";
+    },
+  );
+
+  const keptLines: string[] = [];
+  for (const line of withInlineCommandsRemoved.split("\n")) {
+    const match = line.match(SEND_FILE_LINE_COMMAND_REGEX);
+    if (match && match[1]) {
+      const trimmedPath = match[1].trim();
+      if (trimmedPath) {
+        filePaths.push(trimmedPath);
+      }
+      continue;
+    }
+
+    keptLines.push(line);
+  }
+
+  const sanitizedText = keptLines.join("\n").replace(/\n{3,}/g, "\n\n").replace(
+    SEND_FILE_DIRECTIVE_REGEX,
+    (_fullMatch: string, rawPath: string) => {
+      const trimmedPath = rawPath.trim();
+      if (trimmedPath) {
+        filePaths.push(trimmedPath);
+      }
+      return "";
+    },
+  );
+
+  const dedupedPaths = Array.from(new Set(filePaths));
+
+  return {
+    sanitizedText: sanitizedText.trim(),
+    filePaths: dedupedPaths,
+  };
+}
+
+function looksLikeFilePath(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (/^(?:\.\.?[\\/]|~[\\/]|[a-zA-Z]:[\\/]|\/)/.test(trimmed)) {
+    return true;
+  }
+
+  if (/[\\/]/.test(trimmed)) {
+    return true;
+  }
+
+  if (/[^\s]+\.[a-zA-Z0-9]{1,8}$/.test(trimmed)) {
+    return true;
+  }
+
+  return false;
+}
+
+function parseNaturalSendFileRequest(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const patterns = [
+    /(?:把|将)\s*`([^`]+)`\s*(?:发送|发)\s*(?:给我|给我看|给我一下|给我下|给我吧)/i,
+    /(?:发送|发)\s*`([^`]+)`\s*(?:给我|给我看|给我一下|给我下|给我吧)/i,
+    /send\s+`([^`]+)`\s+to\s+me/i,
+    /(?:把|将)\s*(\S+)\s*(?:发送|发)\s*(?:给我|给我看|给我一下|给我下|给我吧)/i,
+    /(?:发送|发)\s*(\S+)\s*(?:给我|给我看|给我一下|给我下|给我吧)/i,
+    /send\s+(\S+)\s+to\s+me/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    if (match?.[1]) {
+      const candidate = match[1].trim();
+      if (looksLikeFilePath(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractAutoSendCandidatePaths(text: string): string[] {
+  const candidates: string[] = [];
+
+  for (const match of text.matchAll(FILE_PATH_IN_BACKTICKS_REGEX)) {
+    const candidate = match[1]?.trim();
+    if (candidate) {
+      candidates.push(candidate);
+    }
+  }
+
+  for (const match of text.matchAll(FILE_PATH_GENERIC_REGEX)) {
+    const candidate = match[0]?.trim();
+    if (candidate) {
+      candidates.push(candidate);
+    }
+  }
+
+  return Array.from(new Set(candidates));
+}
+
+function parseAutoSendFilePathsFromAssistantText(text: string): string[] {
+  if (!AUTO_SEND_SIGNAL_REGEX.test(text)) {
+    return [];
+  }
+
+  return extractAutoSendCandidatePaths(text).slice(0, MAX_AUTO_FILES_PER_MESSAGE);
+}
+
+function cleanupExpiredSendFileSelections(): void {
+  const now = Date.now();
+  for (const [token, selection] of pendingSendFileSelections.entries()) {
+    if (now - selection.createdAt > SEND_FILE_SELECTION_TTL_MS) {
+      pendingSendFileSelections.delete(token);
+    }
+  }
+}
+
+function createSendFileSelectionKeyboard(token: string, candidates: string[]): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidate = candidates[i];
+    const labelRaw = path.basename(candidate) || candidate;
+    const label = labelRaw.length > 48 ? `${labelRaw.slice(0, 45)}...` : labelRaw;
+    keyboard.text(label, `${SEND_FILE_SELECTION_PREFIX}${token}:${i}`).row();
+  }
+
+  keyboard.text(t("sendfile.choice.cancel"), `${SEND_FILE_SELECTION_CANCEL_PREFIX}${token}`);
+  return keyboard;
+}
+
+async function replySendFileFailure(ctx: Context, reason: "not_found" | "not_file" | "too_large" | "send_error"): Promise<void> {
+  if (reason === "not_found") {
+    await ctx.reply(t("sendfile.file_not_found"));
+    return;
+  }
+
+  if (reason === "not_file") {
+    await ctx.reply(t("sendfile.not_a_file"));
+    return;
+  }
+
+  if (reason === "too_large") {
+    await ctx.reply(t("sendfile.too_large_unknown", { limit: config.files.maxFileSizeKb }));
+    return;
+  }
+
+  await ctx.reply(t("sendfile.error"));
+}
+
+async function handleNaturalSendFileRequest(ctx: Context, requestedPath: string): Promise<void> {
+  cleanupExpiredSendFileSelections();
+
+  if (!ctx.chat) {
+    return;
+  }
+
+  const threadId = getThreadId(ctx);
+  const chatId = ctx.chat.id;
+  const candidates = await findFileCandidatesForRequest(requestedPath);
+
+  if (candidates.length === 0) {
+    await ctx.reply(t("sendfile.file_not_found"));
+    return;
+  }
+
+  if (candidates.length === 1) {
+    const result = await sendFileByApi(ctx.api, chatId, threadId, candidates[0]);
+    if (!result.ok) {
+      await replySendFileFailure(ctx, result.reason);
+    }
+    return;
+  }
+
+  const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  pendingSendFileSelections.set(token, {
+    chatId,
+    threadId,
+    requestedPath,
+    candidates,
+    createdAt: Date.now(),
+  });
+
+  const limitedCandidates = candidates.slice(0, SEND_FILE_SELECTION_MAX_CANDIDATES);
+  await ctx.reply(
+    t("sendfile.multiple_found", {
+      path: requestedPath,
+      count: String(candidates.length),
+    }),
+    {
+      reply_markup: createSendFileSelectionKeyboard(token, limitedCandidates),
+      message_thread_id: threadId ?? undefined,
+    },
+  );
+}
+
+async function handleSendFileSelectionCallback(ctx: Context): Promise<boolean> {
+  const data = ctx.callbackQuery?.data;
+  if (!data) {
+    return false;
+  }
+
+  if (data.startsWith(SEND_FILE_SELECTION_CANCEL_PREFIX)) {
+    const token = data.slice(SEND_FILE_SELECTION_CANCEL_PREFIX.length);
+    pendingSendFileSelections.delete(token);
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(t("sendfile.choice.cancelled"));
+    return true;
+  }
+
+  if (!data.startsWith(SEND_FILE_SELECTION_PREFIX)) {
+    return false;
+  }
+
+  const payload = data.slice(SEND_FILE_SELECTION_PREFIX.length);
+  const separatorIndex = payload.lastIndexOf(":");
+  if (separatorIndex < 0) {
+    await ctx.answerCallbackQuery({ text: t("sendfile.choice.expired"), show_alert: false });
+    return true;
+  }
+
+  const token = payload.slice(0, separatorIndex);
+  const indexRaw = payload.slice(separatorIndex + 1);
+  const index = Number.parseInt(indexRaw, 10);
+
+  const selection = pendingSendFileSelections.get(token);
+  if (!selection || Number.isNaN(index) || index < 0 || index >= selection.candidates.length) {
+    await ctx.answerCallbackQuery({ text: t("sendfile.choice.expired"), show_alert: false });
+    return true;
+  }
+
+  pendingSendFileSelections.delete(token);
+  await ctx.answerCallbackQuery();
+
+  const chosenPath = selection.candidates[index];
+  const result = await sendFileByApi(ctx.api, selection.chatId, selection.threadId, chosenPath);
+  if (!result.ok) {
+    await ctx.editMessageText(t("sendfile.choice.failed", { path: selection.requestedPath }));
+    return true;
+  }
+
+  await ctx.editMessageText(t("sendfile.choice.sent", { path: result.absolutePath }));
+  return true;
+}
+
+async function sendRequestedFiles(
+  bot: Bot<Context>,
+  chatId: number,
+  threadId: number | null,
+  baseDirectory: string,
+  filePaths: string[],
+): Promise<void> {
+  for (const requestedPath of filePaths) {
+    const absolutePath = path.isAbsolute(requestedPath)
+      ? requestedPath
+      : path.resolve(baseDirectory, requestedPath);
+
+    try {
+      const stats = await fs.stat(absolutePath);
+      if (!stats.isFile()) {
+        logger.warn(`[Bot] SEND_FILE skipped non-file path: ${absolutePath}`);
+        continue;
+      }
+
+      const sizeKb = Math.floor(stats.size / 1024);
+      if (sizeKb > config.files.maxFileSizeKb) {
+        logger.warn(
+          `[Bot] SEND_FILE skipped oversized file: ${absolutePath} (${sizeKb}KB > ${config.files.maxFileSizeKb}KB)`,
+        );
+        continue;
+      }
+
+      await bot.api.sendDocument(chatId, new InputFile(absolutePath), {
+        caption: prepareDocumentCaption(requestedPath),
+        message_thread_id: threadId ?? undefined,
+      });
+
+      logger.info(`[Bot] SEND_FILE sent document: ${absolutePath}`);
+    } catch (err) {
+      logger.warn(`[Bot] SEND_FILE failed for path: ${absolutePath}`, err);
+    }
+  }
+}
 
 function prepareDocumentCaption(caption: string): string {
   const normalizedCaption = caption.trim();
@@ -86,6 +464,7 @@ const toolMessageBatcher = new ToolMessageBatcher({
 
     await botInstance.api.sendMessage(chatIdInstance, text, {
       disable_notification: true,
+      message_thread_id: threadIdInstance ?? undefined,
     });
   },
   sendFile: async (sessionId, fileData) => {
@@ -111,6 +490,7 @@ const toolMessageBatcher = new ToolMessageBatcher({
       await botInstance.api.sendDocument(chatIdInstance, new InputFile(tempFilePath), {
         caption: fileData.caption,
         disable_notification: true,
+        message_thread_id: threadIdInstance ?? undefined,
       });
     } finally {
       await fs.unlink(tempFilePath).catch(() => {});
@@ -159,38 +539,71 @@ async function ensureEventSubscription(directory: string): Promise<void> {
   });
 
   summaryAggregator.setOnComplete(async (sessionId, messageText) => {
-    if (!botInstance || !chatIdInstance) {
+    if (!botInstance) {
       logger.error("Bot or chat ID not available for sending message");
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (currentSession?.id !== sessionId) {
+    const routeContext = getSessionRouteContext(sessionId);
+    if (!routeContext) {
       return;
     }
 
     await toolMessageBatcher.flushSession(sessionId, "assistant_message_completed");
 
     try {
-      const parts = formatSummary(messageText);
+      const { sanitizedText, filePaths } = parseSendFileDirectives(messageText);
+
+      if (filePaths.length > 0) {
+        await sendRequestedFiles(
+          botInstance,
+          routeContext.chatId,
+          routeContext.threadId,
+          routeContext.directory,
+          filePaths,
+        );
+      }
+
+      if (filePaths.length === 0) {
+        const autoFilePaths = parseAutoSendFilePathsFromAssistantText(messageText);
+        if (autoFilePaths.length > 0) {
+          logger.info(`[Bot] Auto-send detected file paths: ${autoFilePaths.join(", ")}`);
+          await sendRequestedFiles(
+            botInstance,
+            routeContext.chatId,
+            routeContext.threadId,
+            routeContext.directory,
+            autoFilePaths,
+          );
+        }
+      }
+
+      const textToSend = sanitizedText.length > 0 ? sanitizedText : filePaths.length > 0 ? "" : messageText;
+      const parts = textToSend ? formatSummary(textToSend) : [];
 
       logger.debug(
-        `[Bot] Sending completed message to Telegram (chatId=${chatIdInstance}, parts=${parts.length})`,
+        `[Bot] Sending completed message to Telegram (chatId=${routeContext.chatId}, threadId=${routeContext.threadId}, parts=${parts.length})`,
       );
       for (let i = 0; i < parts.length; i++) {
         const isLastPart = i === parts.length - 1;
+        const messageThreadId = routeContext.threadId ?? undefined;
         if (isLastPart && keyboardManager.isInitialized()) {
           // Attach updated keyboard to the last message part (only if initialized)
           const keyboard = keyboardManager.getKeyboard();
           if (keyboard) {
-            await botInstance.api.sendMessage(chatIdInstance, parts[i], {
+            await botInstance.api.sendMessage(routeContext.chatId, parts[i], {
               reply_markup: keyboard,
+              message_thread_id: messageThreadId,
             });
           } else {
-            await botInstance.api.sendMessage(chatIdInstance, parts[i]);
+            await botInstance.api.sendMessage(routeContext.chatId, parts[i], {
+              message_thread_id: messageThreadId,
+            });
           }
         } else {
-          await botInstance.api.sendMessage(chatIdInstance, parts[i]);
+          await botInstance.api.sendMessage(routeContext.chatId, parts[i], {
+            message_thread_id: messageThreadId,
+          });
         }
       }
     } catch (err) {
@@ -202,13 +615,13 @@ async function ensureEventSubscription(directory: string): Promise<void> {
   });
 
   summaryAggregator.setOnTool(async (toolInfo) => {
-    if (!botInstance || !chatIdInstance) {
+    if (!botInstance) {
       logger.error("Bot or chat ID not available for sending tool notification");
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== toolInfo.sessionId) {
+    const routeContext = getSessionRouteContext(toolInfo.sessionId);
+    if (!routeContext) {
       return;
     }
 
@@ -231,13 +644,17 @@ async function ensureEventSubscription(directory: string): Promise<void> {
   });
 
   summaryAggregator.setOnToolFile(async (fileInfo) => {
-    if (!botInstance || !chatIdInstance) {
+    if (!botInstance) {
       logger.error("Bot or chat ID not available for sending file");
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== fileInfo.sessionId) {
+    if (config.bot.hideToolCallMessages) {
+      return;
+    }
+
+    const routeContext = getSessionRouteContext(fileInfo.sessionId);
+    if (!routeContext) {
       return;
     }
 
@@ -255,14 +672,21 @@ async function ensureEventSubscription(directory: string): Promise<void> {
   });
 
   summaryAggregator.setOnQuestion(async (questions, requestID) => {
-    if (!botInstance || !chatIdInstance) {
+    if (!botInstance) {
       logger.error("Bot or chat ID not available for showing questions");
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (currentSession) {
-      await toolMessageBatcher.flushSession(currentSession.id, "question_asked");
+    const activeSession = getCurrentSession();
+    if (activeSession) {
+      await toolMessageBatcher.flushSession(activeSession.id, "question_asked");
+    }
+
+    const inferredSessionId = activeSession?.id;
+    const routeContext = inferredSessionId ? getSessionRouteContext(inferredSessionId) : null;
+    const targetChatId = routeContext?.chatId ?? chatIdInstance;
+    if (!targetChatId) {
+      return;
     }
 
     if (questionManager.isActive()) {
@@ -270,7 +694,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 
       const previousMessageIds = questionManager.getMessageIds();
       for (const messageId of previousMessageIds) {
-        await botInstance.api.deleteMessage(chatIdInstance, messageId).catch(() => {});
+        await botInstance.api.deleteMessage(targetChatId, messageId).catch(() => {});
       }
 
       clearAllInteractionState("question_replaced_by_new_poll");
@@ -278,7 +702,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 
     logger.info(`[Bot] Received ${questions.length} questions from agent, requestID=${requestID}`);
     questionManager.startQuestions(questions, requestID);
-    await showCurrentQuestion(botInstance.api, chatIdInstance);
+    await showCurrentQuestion(botInstance.api, targetChatId);
   });
 
   summaryAggregator.setOnQuestionError(async () => {
@@ -298,7 +722,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
   });
 
   summaryAggregator.setOnPermission(async (request) => {
-    if (!botInstance || !chatIdInstance) {
+    if (!botInstance) {
       logger.error("Bot or chat ID not available for showing permission request");
       return;
     }
@@ -308,7 +732,13 @@ async function ensureEventSubscription(directory: string): Promise<void> {
     logger.info(
       `[Bot] Received permission request from agent: type=${request.permission}, requestID=${request.id}`,
     );
-    await showPermissionRequest(botInstance.api, chatIdInstance, request);
+    const routeContext = getSessionRouteContext(request.sessionID);
+    const targetChatId = routeContext?.chatId ?? chatIdInstance;
+    if (!targetChatId) {
+      return;
+    }
+
+    await showPermissionRequest(botInstance.api, targetChatId, request);
   });
 
   summaryAggregator.setOnThinking(async (sessionId) => {
@@ -316,12 +746,12 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
-    if (!botInstance || !chatIdInstance) {
+    if (!botInstance) {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    const routeContext = getSessionRouteContext(sessionId);
+    if (!routeContext) {
       return;
     }
 
@@ -384,7 +814,9 @@ async function ensureEventSubscription(directory: string): Promise<void> {
         : normalizedMessage;
 
     await botInstance.api
-      .sendMessage(chatIdInstance, t("bot.session_error", { message: truncatedMessage }))
+      .sendMessage(chatIdInstance, t("bot.session_error", { message: truncatedMessage }), {
+        message_thread_id: threadIdInstance ?? undefined,
+      })
       .catch((err) => {
         logger.error("[Bot] Failed to send session.error message:", err);
       });
@@ -479,6 +911,16 @@ export function createBot(): Bot<Context> {
     }
   }, 5000);
 
+  setInterval(() => {
+    cleanupExpiredSendFileSelections();
+
+    if (!botInstance) {
+      return;
+    }
+
+    void processExternalSendFileRequests(botInstance, chatIdInstance, threadIdInstance);
+  }, config.external.sendFileRequestPollIntervalMs);
+
   // Log all API calls for diagnostics
   let lastGetUpdatesTime = Date.now();
   bot.api.config.use(async (prev, method, payload, signal) => {
@@ -532,6 +974,8 @@ export function createBot(): Bot<Context> {
   bot.command("model", handleModelCommand);
   bot.command("stop", stopCommand);
   bot.command("rename", renameCommand);
+  bot.command("screenshot", screenshotCommand);
+  bot.command("sendfile", sendfileCommand);
 
   bot.on("message:text", unknownCommandMiddleware);
 
@@ -540,6 +984,11 @@ export function createBot(): Bot<Context> {
     logger.debug(`[Bot] Callback context: from=${ctx.from?.id}, chat=${ctx.chat?.id}`);
 
     try {
+      const handledSendFileSelection = await handleSendFileSelectionCallback(ctx);
+      if (handledSendFileSelection) {
+        return;
+      }
+
       const handledInlineCancel = await handleInlineMenuCancel(ctx);
       const handledSession = await handleSessionSelect(ctx);
       const handledProject = await handleProjectSelect(ctx);
@@ -552,10 +1001,11 @@ export function createBot(): Bot<Context> {
       const handledRenameCancel = await handleRenameCancel(ctx);
 
       logger.debug(
-        `[Bot] Callback handled: inlineCancel=${handledInlineCancel}, session=${handledSession}, project=${handledProject}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, rename=${handledRenameCancel}`,
+        `[Bot] Callback handled: sendFileSelection=${handledSendFileSelection}, inlineCancel=${handledInlineCancel}, session=${handledSession}, project=${handledProject}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, rename=${handledRenameCancel}`,
       );
 
       if (
+        !handledSendFileSelection &&
         !handledInlineCancel &&
         !handledSession &&
         !handledProject &&
@@ -577,9 +1027,7 @@ export function createBot(): Bot<Context> {
     }
   });
 
-  // Handle Reply Keyboard button press (agent mode indicator)
-  bot.hears(/^(📋|🛠️|💬|🔍|📝|📄|📦|🤖) \w+ Mode$/, async (ctx) => {
-    logger.debug(`[Bot] Agent mode button pressed: ${ctx.message?.text}`);
+  bot.hears(/^(📋|🛠️|💬|🔍|📝|📄|📦|🤖|🔄|🔨|🔮|📚|🗺️|🔥|🦉|🎭|👁️|🐣|⚡) .+ Mode$/, async (ctx) => {
 
     try {
       if (await blockMenuWhileInteractionActive(ctx)) {
@@ -682,17 +1130,43 @@ export function createBot(): Bot<Context> {
   const voicePromptDeps = { bot, ensureEventSubscription };
 
   bot.on("message:voice", async (ctx) => {
-    logger.debug(`[Bot] Received voice message, chatId=${ctx.chat.id}`);
+    logger.debug(`[Bot] Received voice message, chatId=${ctx.chat.id}, threadId=${getThreadId(ctx)}`);
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
+    threadIdInstance = getThreadId(ctx);
     await handleVoiceMessage(ctx, voicePromptDeps);
+    syncThreadRouteContext(ctx);
   });
 
   bot.on("message:audio", async (ctx) => {
-    logger.debug(`[Bot] Received audio message, chatId=${ctx.chat.id}`);
+    logger.debug(`[Bot] Received audio message, chatId=${ctx.chat.id}, threadId=${getThreadId(ctx)}`);
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
+    threadIdInstance = getThreadId(ctx);
     await handleVoiceMessage(ctx, voicePromptDeps);
+    syncThreadRouteContext(ctx);
+  });
+
+  // Photo message handler - download and send to OpenCode
+  bot.on("message:photo", async (ctx) => {
+    logger.debug(`[Bot] Received photo message, chatId=${ctx.chat.id}, threadId=${getThreadId(ctx)}`);
+    botInstance = bot;
+    chatIdInstance = ctx.chat.id;
+    threadIdInstance = getThreadId(ctx);
+    const imageDeps = { bot, ensureEventSubscription };
+    await handleImageMessage(ctx, imageDeps);
+    syncThreadRouteContext(ctx);
+  });
+
+  // Document message handler - download and send to OpenCode
+  bot.on("message:document", async (ctx) => {
+    logger.debug(`[Bot] Received document message, chatId=${ctx.chat.id}, threadId=${getThreadId(ctx)}`);
+    botInstance = bot;
+    chatIdInstance = ctx.chat.id;
+    threadIdInstance = getThreadId(ctx);
+    const imageDeps = { bot, ensureEventSubscription };
+    await handleImageMessage(ctx, imageDeps);
+    syncThreadRouteContext(ctx);
   });
 
   bot.on("message:text", async (ctx) => {
@@ -715,11 +1189,24 @@ export function createBot(): Bot<Context> {
       return;
     }
 
+    const naturalSendFilePath = parseNaturalSendFileRequest(text);
+    if (naturalSendFilePath) {
+      await handleNaturalSendFileRequest(ctx, naturalSendFilePath);
+      return;
+    }
+
+    if (isScreenshotRequestText(text)) {
+      await captureAndSendScreenshot(ctx);
+      return;
+    }
+
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
+    threadIdInstance = getThreadId(ctx);
 
     const promptDeps = { bot, ensureEventSubscription };
     await processUserPrompt(ctx, text, promptDeps);
+    syncThreadRouteContext(ctx);
 
     logger.debug("[Bot] message:text handler completed (prompt sent in background)");
   });

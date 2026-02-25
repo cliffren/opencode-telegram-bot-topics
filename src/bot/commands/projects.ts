@@ -122,8 +122,9 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
     keyboardManager.updateContext(0, contextLimit);
 
     // Get current state for keyboard (with context = 0)
-    const currentAgent = getStoredAgent();
-    const currentModel = getStoredModel();
+    const threadId = ctx.callbackQuery?.message?.message_thread_id ?? null;
+    const currentAgent = getStoredAgent(threadId, ctx.chat?.id ?? null);
+    const currentModel = getStoredModel(threadId, ctx.chat?.id ?? null);
     const contextInfo = { tokensUsed: 0, tokensLimit: contextLimit };
     const variantName = formatVariantForButton(currentModel.variant || "default");
     const keyboard = createMainKeyboard(currentAgent, currentModel, contextInfo, variantName);
