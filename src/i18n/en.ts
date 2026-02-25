@@ -100,6 +100,7 @@ export const en = {
   "sessions.empty": "📭 No sessions found.\n\nCreate a new session with /new.",
   "sessions.select": "Select a session:",
   "sessions.select_sub": "Select a session (main or sub-session):",
+  "sessions.button.back": "⬅️ Back",
   "sessions.fetch_error":
     "🔴 OpenCode Server is unavailable or an error occurred while loading sessions.",
   "sessions.select_project_first": "🔴 Project is not selected. Use /projects.",

@@ -7,7 +7,11 @@ import { clearAllInteractionState } from "../../interaction/cleanup.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
 import { keyboardManager } from "../../keyboard/manager.js";
-import { ensureActiveInlineMenu, replyWithInlineMenu } from "../handlers/inline-menu.js";
+import {
+  appendInlineMenuCancelButton,
+  ensureActiveInlineMenu,
+  replyWithInlineMenu,
+} from "../handlers/inline-menu.js";
 import { setCurrentSessionByThread } from "../handlers/prompt.js";
 import { logger } from "../../utils/logger.js";
 import { safeBackgroundTask } from "../../utils/safe-background-task.js";
@@ -92,7 +96,8 @@ function buildSubSessionMenu(
     });
   }
 
-  return keyboard;
+  keyboard.text(t("sessions.button.back"), `session:${threadToken}:b:${rootIndex}`).row();
+  return appendInlineMenuCancelButton(keyboard, "session");
 }
 
 export async function sessionsCommand(ctx: CommandContext<Context>) {
@@ -158,7 +163,7 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
   let callbackThreadId: number | null = null;
   let action: string | undefined;
   let childSessionId: string | undefined;
-  let compactAction: "r" | "h" | "m" | "c" | null = null;
+  let compactAction: "r" | "h" | "m" | "c" | "b" | null = null;
   let compactRootIndex: number | null = null;
   let compactChildIndex: number | null = null;
 
@@ -179,7 +184,10 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
       payloadParts[3] !== undefined ? Number.parseInt(payloadParts[3], 10) : Number.NaN;
 
     if (
-      (maybeCompactAction === "r" || maybeCompactAction === "h" || maybeCompactAction === "m") &&
+      (maybeCompactAction === "r" ||
+        maybeCompactAction === "h" ||
+        maybeCompactAction === "m" ||
+        maybeCompactAction === "b") &&
       Number.isFinite(parsedRootIndex)
     ) {
       compactAction = maybeCompactAction;
@@ -232,6 +240,22 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
       }
 
       const rootSessions = buildSessionTree(allSessions as SessionWithChildren[]);
+
+      if (compactAction === "b") {
+        const rootMenuKeyboard = buildRootSessionMenu(rootSessions, threadToken, localeForDate);
+        try {
+          await ctx.editMessageText(t("sessions.select"), {
+            reply_markup: appendInlineMenuCancelButton(rootMenuKeyboard, "session"),
+          });
+        } catch (error) {
+          if (!isMessageNotModifiedError(error)) {
+            throw error;
+          }
+          await ctx.answerCallbackQuery();
+        }
+        return true;
+      }
+
       const mainSession = rootSessions[compactRootIndex];
 
       if (!mainSession) {

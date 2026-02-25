@@ -99,6 +99,7 @@ export const ru: I18nDictionary = {
   "sessions.empty": "📭 Сессий нет.\n\nСоздайте новую сессию командой /new.",
   "sessions.select": "Выберите сессию:",
   "sessions.select_sub": "Выберите сессию (основную или дочернюю):",
+  "sessions.button.back": "⬅️ Назад",
   "sessions.fetch_error":
     "🔴 OpenCode Server недоступен или произошла ошибка при получении списка сессий.",
   "sessions.select_project_first": "🔴 Проект не выбран. Используйте /projects.",
