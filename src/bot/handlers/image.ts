@@ -122,13 +122,46 @@ async function downloadTelegramFile(
   }
 }
 
-function detectMimeType(filename: string, telegramDocumentMimeType?: string): string {
+function detectMimeType(filename: string, telegramDocumentMimeType?: string, isPhoto: boolean = false): string {
   if (telegramDocumentMimeType && telegramDocumentMimeType.trim()) {
     return telegramDocumentMimeType;
   }
 
   const extension = path.extname(filename).toLowerCase();
   switch (extension) {
+    case ".txt":
+    case ".md":
+    case ".log":
+      return "text/plain";
+    case ".json":
+      return "application/json";
+    case ".yaml":
+    case ".yml":
+      return "application/yaml";
+    case ".ts":
+      return "text/typescript";
+    case ".tsx":
+      return "text/tsx";
+    case ".js":
+      return "text/javascript";
+    case ".jsx":
+      return "text/jsx";
+    case ".py":
+      return "text/x-python";
+    case ".go":
+      return "text/x-go";
+    case ".java":
+      return "text/x-java-source";
+    case ".rs":
+      return "text/x-rust";
+    case ".cpp":
+    case ".cc":
+    case ".cxx":
+      return "text/x-c++src";
+    case ".c":
+      return "text/x-csrc";
+    case ".pdf":
+      return "application/pdf";
     case ".png":
       return "image/png";
     case ".webp":
@@ -143,9 +176,22 @@ function detectMimeType(filename: string, telegramDocumentMimeType?: string): st
       return "image/heif";
     case ".jpg":
     case ".jpeg":
-    default:
       return "image/jpeg";
+    default:
+      return isPhoto ? "image/jpeg" : "application/octet-stream";
   }
+}
+
+function buildPromptText(filename: string, mime: string, userCaption?: string): string {
+  if (userCaption && userCaption.trim()) {
+    return `[File attached: ${filename}]\n\nUser request: ${userCaption}`;
+  }
+
+  if (mime.startsWith("image/")) {
+    return `[Image analysis: ${filename}]\nPlease analyze this image and help me with any questions about it.`;
+  }
+
+  return `[File analysis: ${filename}]\nPlease inspect this file and help me with it. If it is source code or text, read and analyze its content.`;
 }
 
 function scheduleTempFileCleanup(filePath: string): void {
@@ -162,6 +208,7 @@ export async function handleImageMessage(ctx: Context, deps: ProcessPromptDeps):
   const photo = ctx.message?.photo;
   const document = ctx.message?.document;
   const userCaption = ctx.message?.caption;
+  const isPhotoMessage = Boolean(photo && photo.length > 0);
 
   let fileId: string | undefined;
 
@@ -203,7 +250,7 @@ export async function handleImageMessage(ctx: Context, deps: ProcessPromptDeps):
     await fs.writeFile(tempFilePath, fileData.buffer);
 
     const fileUrl = `file://${tempFilePath}`;
-    const mime = detectMimeType(fileData.filename, document?.mime_type);
+    const mime = detectMimeType(fileData.filename, document?.mime_type, isPhotoMessage);
 
     const filePart: PromptFilePartInput = {
       type: "file",
@@ -212,12 +259,7 @@ export async function handleImageMessage(ctx: Context, deps: ProcessPromptDeps):
       filename: fileData.filename,
     };
 
-    let promptText = `[Image analysis: ${fileData.filename}]\nPlease analyze this image`;
-    if (userCaption) {
-      promptText += `\n\nUser request: ${userCaption}`;
-    } else {
-      promptText += "\n\nPlease help me with any questions I have about it.";
-    }
+    const promptText = buildPromptText(fileData.filename, mime, userCaption);
 
     logger.info(`[Image] Sending image to OpenCode: ${fileUrl} (${mime})`);
 
