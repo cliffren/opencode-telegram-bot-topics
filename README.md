@@ -78,10 +78,132 @@ Compared to the upstream baseline, this fork adds and improves the following are
 opencode serve
 ```
 
-4. Run bot:
+4. Run bot (local repo):
 
 ```bash
-npx @grinev/opencode-telegram-bot
+cd /Users/rentao/Projects/opencode-telegram-bot-topics
+npm install
+npm run build
+node dist/cli.js start
+```
+
+Next runs (after build):
+
+```bash
+cd /Users/rentao/Projects/opencode-telegram-bot-topics
+node dist/cli.js start
+```
+
+Optional (LaunchAgent test service used in this setup):
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.opencode.telegram-bot-test
+launchctl print gui/$(id -u)/com.opencode.telegram-bot-test
+```
+
+Linux (manual run):
+
+```bash
+cd /path/to/opencode-telegram-bot-topics
+npm install
+npm run build
+node dist/cli.js start
+```
+
+Linux (systemd user service, optional):
+
+```bash
+systemctl --user restart opencode-telegram-bot
+journalctl --user -u opencode-telegram-bot -f
+```
+
+Windows (manual run, PowerShell):
+
+```powershell
+cd C:\path\to\opencode-telegram-bot-topics
+npm install
+npm run build
+node dist\cli.js start
+```
+
+Windows (service via NSSM, optional):
+
+```powershell
+nssm restart opencode-telegram-bot
+nssm status opencode-telegram-bot
+```
+
+## Service setup examples
+
+Linux (systemd user service, recommended):
+
+1. Create service file: `~/.config/systemd/user/opencode-telegram-bot.service`
+
+```ini
+[Unit]
+Description=OpenCode Telegram Bot
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/opencode-telegram-bot-topics
+ExecStart=/usr/bin/node /path/to/opencode-telegram-bot-topics/dist/cli.js start
+Restart=always
+RestartSec=5
+Environment=OPENCODE_TELEGRAM_HOME=/home/youruser/.local/share/opencode-telegram-bot
+Environment=OPENCODE_TELEGRAM_RUNTIME_MODE=installed
+
+[Install]
+WantedBy=default.target
+```
+
+2. Reload and start:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now opencode-telegram-bot
+```
+
+3. Manage service:
+
+```bash
+systemctl --user restart opencode-telegram-bot
+systemctl --user status opencode-telegram-bot
+journalctl --user -u opencode-telegram-bot -f
+```
+
+Windows (service via NSSM, recommended):
+
+1. Install service:
+
+```powershell
+nssm install opencode-telegram-bot "C:\Program Files\nodejs\node.exe" "C:\path\to\opencode-telegram-bot-topics\dist\cli.js" start
+```
+
+2. Set working directory:
+
+```powershell
+nssm set opencode-telegram-bot AppDirectory "C:\path\to\opencode-telegram-bot-topics"
+```
+
+3. Set environment variables (optional but recommended):
+
+```powershell
+nssm set opencode-telegram-bot AppEnvironmentExtra "OPENCODE_TELEGRAM_HOME=C:\Users\YourUser\AppData\Roaming\opencode-telegram-bot" "OPENCODE_TELEGRAM_RUNTIME_MODE=installed"
+```
+
+4. Start and enable auto-start:
+
+```powershell
+nssm start opencode-telegram-bot
+nssm set opencode-telegram-bot Start SERVICE_AUTO_START
+```
+
+5. Manage service:
+
+```powershell
+nssm restart opencode-telegram-bot
+nssm status opencode-telegram-bot
 ```
 
 ## Main commands
@@ -125,7 +247,6 @@ For voice/audio transcription:
 ## Development
 
 ```bash
-npm install
 npm run build
 npm run lint
 npm test
