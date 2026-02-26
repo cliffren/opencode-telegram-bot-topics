@@ -498,6 +498,183 @@ const toolMessageBatcher = new ToolMessageBatcher({
   },
 });
 
+const STATUS_PREVIEW_MAX_LENGTH = 32;
+const THINKING_ANIMATION_INTERVAL_MS = 1000;
+const THINKING_DOT_FRAMES = [".", "..", "..."] as const;
+const STATUS_POST_COMPLETE_SUPPRESS_MS = 2000;
+
+function toSingleLineStatusPreview(text: string, maxLength: number = STATUS_PREVIEW_MAX_LENGTH): string {
+  const singleLine = text.replace(/\s+/g, " ").trim();
+  if (singleLine.length <= maxLength) {
+    return singleLine;
+  }
+
+  return `${singleLine.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+interface SessionStatusSlot {
+  messageId: number;
+  lastText: string;
+}
+
+const sessionStatusSlots = new Map<string, SessionStatusSlot>();
+const sessionStatusTasks = new Map<string, Promise<void>>();
+const thinkingAnimations = new Map<string, ReturnType<typeof setInterval>>();
+const sessionStatusCompletedAt = new Map<string, number>();
+
+function clearSessionCompletionGuardByContext(ctx: Context): void {
+  const threadId = getThreadId(ctx);
+  const session = getCurrentSessionByThread(threadId, ctx.chat?.id ?? null);
+  if (!session) {
+    return;
+  }
+
+  sessionStatusCompletedAt.delete(session.id);
+}
+
+function shouldSuppressPostCompleteStatus(sessionId: string): boolean {
+  const completedAt = sessionStatusCompletedAt.get(sessionId);
+  if (!completedAt) {
+    return false;
+  }
+
+  if (Date.now() - completedAt <= STATUS_POST_COMPLETE_SUPPRESS_MS) {
+    return true;
+  }
+
+  sessionStatusCompletedAt.delete(sessionId);
+  return false;
+}
+
+function buildThinkingStatusText(frameIndex: number): string {
+  const base = t("bot.thinking").trim().replace(/[.。…]+$/u, "").trimEnd();
+  const dots = THINKING_DOT_FRAMES[frameIndex % THINKING_DOT_FRAMES.length];
+  if (base.startsWith("💭 ")) {
+    const label = base.slice(2);
+    return `💭[${label}${dots.padEnd(3, " ")}]`;
+  }
+
+  return `[${base}${dots.padEnd(3, " ")}]`;
+}
+
+function stopThinkingAnimation(sessionId: string): void {
+  const timer = thinkingAnimations.get(sessionId);
+  if (!timer) {
+    return;
+  }
+
+  clearInterval(timer);
+  thinkingAnimations.delete(sessionId);
+}
+
+function stopAllThinkingAnimations(): void {
+  for (const timer of thinkingAnimations.values()) {
+    clearInterval(timer);
+  }
+  thinkingAnimations.clear();
+}
+
+function startThinkingAnimation(sessionId: string): void {
+  if (thinkingAnimations.has(sessionId)) {
+    return;
+  }
+
+  let nextFrameIndex = 1;
+  const timer = setInterval(() => {
+    if (!thinkingAnimations.has(sessionId)) {
+      return;
+    }
+
+    const frameText = buildThinkingStatusText(nextFrameIndex);
+    nextFrameIndex = (nextFrameIndex + 1) % THINKING_DOT_FRAMES.length;
+    void enqueueSessionStatusTask(sessionId, () => updateSessionStatusMessage(sessionId, frameText));
+  }, THINKING_ANIMATION_INTERVAL_MS);
+
+  thinkingAnimations.set(sessionId, timer);
+}
+
+function enqueueSessionStatusTask(sessionId: string, task: () => Promise<void>): Promise<void> {
+  const previous = sessionStatusTasks.get(sessionId) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(task)
+    .finally(() => {
+      if (sessionStatusTasks.get(sessionId) === next) {
+        sessionStatusTasks.delete(sessionId);
+      }
+    });
+
+  sessionStatusTasks.set(sessionId, next);
+  return next;
+}
+
+function isMessageNotModifiedError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("message is not modified");
+}
+
+function canRecoverBySendingNewMessage(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("message to edit not found") ||
+    message.includes("message can't be edited") ||
+    message.includes("message is too old") ||
+    message.includes("message_id_invalid")
+  );
+}
+
+async function updateSessionStatusMessage(sessionId: string, text: string): Promise<void> {
+  if (!botInstance) {
+    return;
+  }
+
+  const routeContext = getSessionRouteContext(sessionId);
+  if (!routeContext) {
+    return;
+  }
+
+  const normalizedText = text.trim();
+  if (!normalizedText) {
+    return;
+  }
+
+  const existingSlot = sessionStatusSlots.get(sessionId);
+  if (!existingSlot) {
+    const message = await botInstance.api.sendMessage(routeContext.chatId, normalizedText, {
+      disable_notification: true,
+      message_thread_id: routeContext.threadId ?? undefined,
+    });
+    sessionStatusSlots.set(sessionId, { messageId: message.message_id, lastText: normalizedText });
+    return;
+  }
+
+  if (existingSlot.lastText === normalizedText) {
+    return;
+  }
+
+  try {
+    await botInstance.api.editMessageText(routeContext.chatId, existingSlot.messageId, normalizedText);
+    sessionStatusSlots.set(sessionId, { ...existingSlot, lastText: normalizedText });
+  } catch (error) {
+    if (isMessageNotModifiedError(error)) {
+      return;
+    }
+
+    if (!canRecoverBySendingNewMessage(error)) {
+      throw error;
+    }
+
+    const message = await botInstance.api.sendMessage(routeContext.chatId, normalizedText, {
+      disable_notification: true,
+      message_thread_id: routeContext.threadId ?? undefined,
+    });
+    sessionStatusSlots.set(sessionId, { messageId: message.message_id, lastText: normalizedText });
+  }
+}
+
 async function ensureCommandsInitialized(ctx: Context, next: NextFunction): Promise<void> {
   if (commandsInitialized || !ctx.from || ctx.from.id !== config.telegram.allowedUserId) {
     await next();
@@ -536,6 +713,10 @@ async function ensureEventSubscription(directory: string): Promise<void> {
   toolMessageBatcher.setIntervalSeconds(config.bot.serviceMessagesIntervalSec);
   summaryAggregator.setOnCleared(() => {
     toolMessageBatcher.clearAll("summary_aggregator_clear");
+    sessionStatusSlots.clear();
+    sessionStatusTasks.clear();
+    stopAllThinkingAnimations();
+    sessionStatusCompletedAt.clear();
   });
 
   summaryAggregator.setOnComplete(async (sessionId, messageText) => {
@@ -543,12 +724,15 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       logger.error("Bot or chat ID not available for sending message");
       return;
     }
+    const botApi = botInstance.api;
 
     const routeContext = getSessionRouteContext(sessionId);
     if (!routeContext) {
       return;
     }
 
+    stopThinkingAnimation(sessionId);
+    sessionStatusCompletedAt.set(sessionId, Date.now());
     await toolMessageBatcher.flushSession(sessionId, "assistant_message_completed");
 
     try {
@@ -584,28 +768,62 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       logger.debug(
         `[Bot] Sending completed message to Telegram (chatId=${routeContext.chatId}, threadId=${routeContext.threadId}, parts=${parts.length})`,
       );
-      for (let i = 0; i < parts.length; i++) {
-        const isLastPart = i === parts.length - 1;
+      await enqueueSessionStatusTask(sessionId, async () => {
         const messageThreadId = routeContext.threadId ?? undefined;
-        if (isLastPart && keyboardManager.isInitialized()) {
-          // Attach updated keyboard to the last message part (only if initialized)
-          const keyboard = keyboardManager.getKeyboard();
-          if (keyboard) {
-            await botInstance.api.sendMessage(routeContext.chatId, parts[i], {
-              reply_markup: keyboard,
+        const statusSlot = sessionStatusSlots.get(sessionId);
+
+        if (parts.length > 0 && statusSlot) {
+          try {
+            await botApi.editMessageText(routeContext.chatId, statusSlot.messageId, parts[0]);
+            sessionStatusSlots.delete(sessionId);
+          } catch (error) {
+            if (!isMessageNotModifiedError(error) && !canRecoverBySendingNewMessage(error)) {
+              throw error;
+            }
+
+            const sent = await botApi.sendMessage(routeContext.chatId, parts[0], {
+              message_thread_id: messageThreadId,
+            });
+            sessionStatusSlots.delete(sessionId);
+            logger.debug(
+              `[Bot] Replaced final response via new message after edit failure (session=${sessionId}, messageId=${sent.message_id})`,
+            );
+          }
+
+          for (let i = 1; i < parts.length; i++) {
+            const isLastPart = i === parts.length - 1;
+            if (isLastPart && keyboardManager.isInitialized()) {
+              const keyboardForLastPart = keyboardManager.getKeyboard();
+              await botApi.sendMessage(routeContext.chatId, parts[i], {
+                reply_markup: keyboardForLastPart ?? undefined,
+                message_thread_id: messageThreadId,
+              });
+            } else {
+              await botApi.sendMessage(routeContext.chatId, parts[i], {
+                message_thread_id: messageThreadId,
+              });
+            }
+          }
+
+          return;
+        }
+
+        for (let i = 0; i < parts.length; i++) {
+          const isLastPart = i === parts.length - 1;
+          if (isLastPart && keyboardManager.isInitialized()) {
+            // Attach updated keyboard to the last message part (only if initialized)
+            const keyboard = keyboardManager.getKeyboard();
+            await botApi.sendMessage(routeContext.chatId, parts[i], {
+              reply_markup: keyboard ?? undefined,
               message_thread_id: messageThreadId,
             });
           } else {
-            await botInstance.api.sendMessage(routeContext.chatId, parts[i], {
+            await botApi.sendMessage(routeContext.chatId, parts[i], {
               message_thread_id: messageThreadId,
             });
           }
-        } else {
-          await botInstance.api.sendMessage(routeContext.chatId, parts[i], {
-            message_thread_id: messageThreadId,
-          });
         }
-      }
+      });
     } catch (err) {
       logger.error("Failed to send message to Telegram:", err);
       // Stop processing events after critical error to prevent infinite loop
@@ -625,18 +843,18 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
-    const shouldIncludeToolInfoInFileCaption =
-      toolInfo.hasFileAttachment &&
-      (toolInfo.tool === "write" || toolInfo.tool === "edit" || toolInfo.tool === "apply_patch");
-
-    if (config.bot.hideToolCallMessages || shouldIncludeToolInfoInFileCaption) {
-      return;
-    }
-
     try {
+      if (shouldSuppressPostCompleteStatus(toolInfo.sessionId)) {
+        return;
+      }
+
       const message = formatToolInfo(toolInfo);
       if (message) {
-        toolMessageBatcher.enqueue(toolInfo.sessionId, message);
+        stopThinkingAnimation(toolInfo.sessionId);
+        const preview = toSingleLineStatusPreview(message);
+        await enqueueSessionStatusTask(toolInfo.sessionId, () =>
+          updateSessionStatusMessage(toolInfo.sessionId, preview),
+        );
       }
     } catch (err) {
       logger.error("Failed to send tool notification to Telegram:", err);
@@ -646,10 +864,6 @@ async function ensureEventSubscription(directory: string): Promise<void> {
   summaryAggregator.setOnToolFile(async (fileInfo) => {
     if (!botInstance) {
       logger.error("Bot or chat ID not available for sending file");
-      return;
-    }
-
-    if (config.bot.hideToolCallMessages) {
       return;
     }
 
@@ -742,10 +956,6 @@ async function ensureEventSubscription(directory: string): Promise<void> {
   });
 
   summaryAggregator.setOnThinking(async (sessionId) => {
-    if (config.bot.hideThinkingMessages) {
-      return;
-    }
-
     if (!botInstance) {
       return;
     }
@@ -757,7 +967,10 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 
     logger.debug("[Bot] Agent started thinking");
 
-    toolMessageBatcher.enqueue(sessionId, t("bot.thinking"));
+    await enqueueSessionStatusTask(sessionId, () =>
+      updateSessionStatusMessage(sessionId, buildThinkingStatusText(0)),
+    );
+    startThinkingAnimation(sessionId);
   });
 
   summaryAggregator.setOnTokens(async (tokens) => {
@@ -805,6 +1018,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       return;
     }
 
+    stopThinkingAnimation(sessionId);
     await toolMessageBatcher.flushSession(sessionId, "session_error");
 
     const normalizedMessage = message.trim() || t("common.unknown_error");
@@ -1134,6 +1348,7 @@ export function createBot(): Bot<Context> {
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
     threadIdInstance = getThreadId(ctx);
+    clearSessionCompletionGuardByContext(ctx);
     await handleVoiceMessage(ctx, voicePromptDeps);
     syncThreadRouteContext(ctx);
   });
@@ -1143,6 +1358,7 @@ export function createBot(): Bot<Context> {
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
     threadIdInstance = getThreadId(ctx);
+    clearSessionCompletionGuardByContext(ctx);
     await handleVoiceMessage(ctx, voicePromptDeps);
     syncThreadRouteContext(ctx);
   });
@@ -1153,6 +1369,7 @@ export function createBot(): Bot<Context> {
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
     threadIdInstance = getThreadId(ctx);
+    clearSessionCompletionGuardByContext(ctx);
     const imageDeps = { bot, ensureEventSubscription };
     await handleImageMessage(ctx, imageDeps);
     syncThreadRouteContext(ctx);
@@ -1164,6 +1381,7 @@ export function createBot(): Bot<Context> {
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
     threadIdInstance = getThreadId(ctx);
+    clearSessionCompletionGuardByContext(ctx);
     const imageDeps = { bot, ensureEventSubscription };
     await handleImageMessage(ctx, imageDeps);
     syncThreadRouteContext(ctx);
@@ -1203,6 +1421,7 @@ export function createBot(): Bot<Context> {
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
     threadIdInstance = getThreadId(ctx);
+    clearSessionCompletionGuardByContext(ctx);
 
     const promptDeps = { bot, ensureEventSubscription };
     await processUserPrompt(ctx, text, promptDeps);
