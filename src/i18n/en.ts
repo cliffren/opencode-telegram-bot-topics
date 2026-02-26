@@ -63,6 +63,8 @@ export const en = {
     "⚠️ Active session does not match the selected project, so it was reset. Use /sessions to pick one or /new to create a new session.",
   "bot.prompt_send_error": "Failed to send request to OpenCode.",
   "bot.session_error": "🔴 OpenCode returned an error: {message}",
+  "bot.telegram_rate_limited":
+    "⚠️ Telegram rate limit reached. Status updates are temporarily paused ({seconds}s).",
   "bot.unknown_command": "⚠️ Unknown command: {command}. Use /help to see available commands.",
 
   "status.header_running": "🟢 **OpenCode Server is running**",

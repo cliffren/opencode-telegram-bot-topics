@@ -13,6 +13,9 @@ import type { FileChange, PinnedMessageState, TokensInfo } from "./types.js";
 import { t } from "../i18n/index.js";
 
 class PinnedMessageManager {
+  private static readonly DEFAULT_UPDATE_DEBOUNCE_MS = 2000;
+  private static readonly UPDATE_RETRY_BUFFER_MS = 300;
+
   private api: Api | null = null;
   private chatId: number | null = null;
   private state: PinnedMessageState = {
@@ -28,6 +31,10 @@ class PinnedMessageManager {
   };
   private contextLimit: number | null = null;
   private onKeyboardUpdateCallback?: (tokensUsed: number, tokensLimit: number) => void;
+  private updateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private updateInProgress = false;
+  private updateQueued = false;
+  private rateLimitedUntil = 0;
 
   /**
    * Initialize manager with bot API and chat ID
@@ -87,7 +94,7 @@ class PinnedMessageManager {
     if (this.state.sessionTitle !== newTitle && newTitle) {
       logger.debug(`[PinnedManager] Session title updated: ${newTitle}`);
       this.state.sessionTitle = newTitle;
-      await this.updatePinnedMessage();
+      this.scheduleDebouncedUpdate();
     }
   }
 
@@ -149,7 +156,7 @@ class PinnedMessageManager {
 
       logger.info(`[PinnedManager] Loaded context from history: ${this.state.tokensUsed} tokens`);
 
-      await this.updatePinnedMessage();
+      this.scheduleDebouncedUpdate();
     } catch (err) {
       logger.error("[PinnedManager] Error loading context from history:", err);
     }
@@ -186,7 +193,7 @@ class PinnedMessageManager {
     // Also fetch latest session title (it may have changed after first message)
     await this.refreshSessionTitle();
 
-    await this.updatePinnedMessage();
+    this.scheduleDebouncedUpdate();
   }
 
   /**
@@ -238,7 +245,7 @@ class PinnedMessageManager {
     }
     this.state.changedFiles = diffs;
     logger.debug(`[PinnedManager] Session diff updated: ${diffs.length} files`);
-    await this.updatePinnedMessage();
+    this.scheduleDebouncedUpdate();
   }
 
   /**
@@ -260,16 +267,69 @@ class PinnedMessageManager {
     this.scheduleDebouncedUpdate();
   }
 
-  private updateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-  private scheduleDebouncedUpdate(): void {
+  private scheduleDebouncedUpdate(delayMs: number = PinnedMessageManager.DEFAULT_UPDATE_DEBOUNCE_MS): void {
     if (this.updateDebounceTimer) {
       clearTimeout(this.updateDebounceTimer);
     }
     this.updateDebounceTimer = setTimeout(() => {
       this.updateDebounceTimer = null;
-      this.updatePinnedMessage();
-    }, 500);
+      void this.flushScheduledUpdate();
+    }, Math.max(0, delayMs));
+  }
+
+  private async flushScheduledUpdate(): Promise<void> {
+    if (this.updateInProgress) {
+      this.updateQueued = true;
+      return;
+    }
+
+    const now = Date.now();
+    if (this.rateLimitedUntil > now) {
+      this.scheduleDebouncedUpdate(
+        this.rateLimitedUntil - now + PinnedMessageManager.UPDATE_RETRY_BUFFER_MS,
+      );
+      return;
+    }
+
+    this.updateInProgress = true;
+    try {
+      await this.updatePinnedMessage();
+    } finally {
+      this.updateInProgress = false;
+      if (this.updateQueued) {
+        this.updateQueued = false;
+        this.scheduleDebouncedUpdate(PinnedMessageManager.UPDATE_RETRY_BUFFER_MS);
+      }
+    }
+  }
+
+  private getRetryAfterSeconds(err: unknown): number | null {
+    if (typeof err !== "object" || err === null) {
+      return null;
+    }
+
+    const maybeError = err as {
+      error_code?: number;
+      parameters?: { retry_after?: number };
+      message?: string;
+    };
+
+    if (maybeError.error_code === 429 && typeof maybeError.parameters?.retry_after === "number") {
+      return Math.max(1, Math.floor(maybeError.parameters.retry_after));
+    }
+
+    const message = maybeError.message;
+    if (typeof message === "string") {
+      const match = message.match(/retry after\s+(\d+)/i);
+      if (match) {
+        const parsed = Number.parseInt(match[1] ?? "", 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return parsed;
+        }
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -305,7 +365,7 @@ class PinnedMessageManager {
         logger.info(
           `[PinnedManager] Loaded ${this.state.changedFiles.length} file diffs from session.diff()`,
         );
-        await this.updatePinnedMessage();
+        this.scheduleDebouncedUpdate();
         return;
       }
 
@@ -420,7 +480,7 @@ class PinnedMessageManager {
         logger.info(
           `[PinnedManager] Loaded ${this.state.changedFiles.length} file diffs from messages`,
         );
-        await this.updatePinnedMessage();
+        this.scheduleDebouncedUpdate();
       } else {
         logger.debug("[PinnedManager] loadDiffsFromMessages: no file changes found");
       }
@@ -658,6 +718,18 @@ class PinnedMessageManager {
         });
       }
     } catch (err: unknown) {
+      const retryAfterSeconds = this.getRetryAfterSeconds(err);
+      if (retryAfterSeconds) {
+        this.rateLimitedUntil = Date.now() + retryAfterSeconds * 1000;
+        logger.warn(
+          `[PinnedManager] Telegram rate limit while updating pinned message (retryAfter=${retryAfterSeconds}s)`,
+        );
+        this.scheduleDebouncedUpdate(
+          retryAfterSeconds * 1000 + PinnedMessageManager.UPDATE_RETRY_BUFFER_MS,
+        );
+        return;
+      }
+
       // Handle "message is not modified" error silently
       if (err instanceof Error && err.message.includes("message is not modified")) {
         return;
@@ -723,6 +795,15 @@ class PinnedMessageManager {
       this.state.tokensLimit = 0;
       this.state.changedFiles = [];
       clearPinnedMessageId();
+
+      if (this.updateDebounceTimer) {
+        clearTimeout(this.updateDebounceTimer);
+        this.updateDebounceTimer = null;
+      }
+      this.updateInProgress = false;
+      this.updateQueued = false;
+      this.rateLimitedUntil = 0;
+
       return;
     }
 
@@ -739,6 +820,14 @@ class PinnedMessageManager {
       this.state.tokensLimit = 0;
       this.state.changedFiles = [];
       clearPinnedMessageId();
+
+      if (this.updateDebounceTimer) {
+        clearTimeout(this.updateDebounceTimer);
+        this.updateDebounceTimer = null;
+      }
+      this.updateInProgress = false;
+      this.updateQueued = false;
+      this.rateLimitedUntil = 0;
 
       logger.info("[PinnedManager] Cleared pinned message state");
     } catch (err) {

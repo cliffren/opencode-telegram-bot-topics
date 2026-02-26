@@ -62,6 +62,8 @@ export const ru: I18nDictionary = {
     "⚠️ Активная сессия не соответствует выбранному проекту, поэтому была сброшена. Используйте /sessions для выбора или /new для создания новой сессии.",
   "bot.prompt_send_error": "Не удалось отправить запрос в OpenCode.",
   "bot.session_error": "🔴 OpenCode вернул ошибку: {message}",
+  "bot.telegram_rate_limited":
+    "⚠️ Telegram ограничил частоту запросов. Обновления статуса временно приостановлены ({seconds}с).",
   "bot.unknown_command": "⚠️ Неизвестная команда: {command}. Используйте /help для списка команд.",
 
   "status.header_running": "🟢 **OpenCode Server запущен**",

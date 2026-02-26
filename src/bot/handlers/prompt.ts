@@ -298,7 +298,7 @@ export async function processUserPrompt(
     );
 
     // Ensure pinned message exists for existing session
-    if (!pinnedMessageManager.getState().messageId) {
+    if (!pinnedMessageManager.getState().messageId || pinnedMessageManager.getState().chatId !== ctx.chat!.id) {
       try {
         if (!pinnedMessageManager.isInitialized() || pinnedMessageManager.getState().chatId !== ctx.chat!.id) {
           pinnedMessageManager.initialize(ctx.api, ctx.chat!.id);

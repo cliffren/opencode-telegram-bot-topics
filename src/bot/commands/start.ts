@@ -9,7 +9,7 @@ import { t } from "../../i18n/index.js";
 
 export async function startCommand(ctx: Context): Promise<void> {
   if (ctx.chat) {
-    if (!pinnedMessageManager.isInitialized()) {
+    if (!pinnedMessageManager.isInitialized() || pinnedMessageManager.getState().chatId !== ctx.chat.id) {
       pinnedMessageManager.initialize(ctx.api, ctx.chat.id);
     }
     keyboardManager.initialize(ctx.api, ctx.chat.id);

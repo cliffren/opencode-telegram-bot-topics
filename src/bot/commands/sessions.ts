@@ -449,8 +449,8 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
       }
     }
 
-    // Initialize pinned message manager if not already
-    if (!pinnedMessageManager.isInitialized() && ctx.chat) {
+    // Initialize pinned message manager for this chat
+    if (ctx.chat && (!pinnedMessageManager.isInitialized() || pinnedMessageManager.getState().chatId !== ctx.chat.id)) {
       pinnedMessageManager.initialize(ctx.api, ctx.chat.id);
     }
 

@@ -499,7 +499,8 @@ const toolMessageBatcher = new ToolMessageBatcher({
 });
 
 const STATUS_PREVIEW_MAX_LENGTH = 32;
-const THINKING_ANIMATION_INTERVAL_MS = 1000;
+const THINKING_ANIMATION_MIN_INTERVAL_MS = 1800;
+const THINKING_ANIMATION_MAX_INTERVAL_MS = 2200;
 const THINKING_DOT_FRAMES = [".", "..", "..."] as const;
 const STATUS_POST_COMPLETE_SUPPRESS_MS = 2000;
 
@@ -521,6 +522,8 @@ const sessionStatusSlots = new Map<string, SessionStatusSlot>();
 const sessionStatusTasks = new Map<string, Promise<void>>();
 const thinkingAnimations = new Map<string, ReturnType<typeof setInterval>>();
 const sessionStatusCompletedAt = new Map<string, number>();
+const sessionStatusRateLimitedUntil = new Map<string, number>();
+const sessionStatusRateLimitNoticeUntil = new Map<string, number>();
 
 function clearSessionCompletionGuardByContext(ctx: Context): void {
   const threadId = getThreadId(ctx);
@@ -563,13 +566,13 @@ function stopThinkingAnimation(sessionId: string): void {
     return;
   }
 
-  clearInterval(timer);
+  clearTimeout(timer);
   thinkingAnimations.delete(sessionId);
 }
 
 function stopAllThinkingAnimations(): void {
   for (const timer of thinkingAnimations.values()) {
-    clearInterval(timer);
+    clearTimeout(timer);
   }
   thinkingAnimations.clear();
 }
@@ -579,8 +582,12 @@ function startThinkingAnimation(sessionId: string): void {
     return;
   }
 
+  const getNextIntervalMs = (): number =>
+    THINKING_ANIMATION_MIN_INTERVAL_MS +
+    Math.floor(Math.random() * (THINKING_ANIMATION_MAX_INTERVAL_MS - THINKING_ANIMATION_MIN_INTERVAL_MS + 1));
+
   let nextFrameIndex = 1;
-  const timer = setInterval(() => {
+  const tick = (): void => {
     if (!thinkingAnimations.has(sessionId)) {
       return;
     }
@@ -588,9 +595,13 @@ function startThinkingAnimation(sessionId: string): void {
     const frameText = buildThinkingStatusText(nextFrameIndex);
     nextFrameIndex = (nextFrameIndex + 1) % THINKING_DOT_FRAMES.length;
     void enqueueSessionStatusTask(sessionId, () => updateSessionStatusMessage(sessionId, frameText));
-  }, THINKING_ANIMATION_INTERVAL_MS);
 
-  thinkingAnimations.set(sessionId, timer);
+    const nextTimer = setTimeout(tick, getNextIntervalMs());
+    thinkingAnimations.set(sessionId, nextTimer);
+  };
+
+  const initialTimer = setTimeout(tick, getNextIntervalMs());
+  thinkingAnimations.set(sessionId, initialTimer);
 }
 
 function enqueueSessionStatusTask(sessionId: string, task: () => Promise<void>): Promise<void> {
@@ -626,6 +637,53 @@ function canRecoverBySendingNewMessage(error: unknown): boolean {
   );
 }
 
+function getRateLimitRetryAfterSeconds(error: unknown): number | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+
+  const maybeError = error as {
+    error_code?: number;
+    parameters?: { retry_after?: number };
+    message?: string;
+  };
+
+  if (maybeError.error_code === 429 && typeof maybeError.parameters?.retry_after === "number") {
+    return Math.max(1, Math.floor(maybeError.parameters.retry_after));
+  }
+
+  const message = maybeError.message;
+  if (typeof message === "string") {
+    const match = message.match(/retry after\s+(\d+)/i);
+    if (match) {
+      const parsed = Number.parseInt(match[1] ?? "", 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function notifyRateLimitInChat(
+  routeContext: SessionRouteContext,
+  sessionId: string,
+  retryAfterSeconds: number,
+): Promise<void> {
+  const now = Date.now();
+  const currentNoticeUntil = sessionStatusRateLimitNoticeUntil.get(sessionId) ?? 0;
+  if (currentNoticeUntil > now) {
+    return;
+  }
+
+  const until = now + retryAfterSeconds * 1000;
+  sessionStatusRateLimitNoticeUntil.set(sessionId, until);
+  logger.debug(
+    `[Bot] Suppressed Telegram rate-limit notice (session=${sessionId}, chatId=${routeContext.chatId}, retryAfter=${retryAfterSeconds}s)`,
+  );
+}
+
 async function updateSessionStatusMessage(sessionId: string, text: string): Promise<void> {
   if (!botInstance) {
     return;
@@ -641,13 +699,35 @@ async function updateSessionStatusMessage(sessionId: string, text: string): Prom
     return;
   }
 
+  const now = Date.now();
+  const rateLimitedUntil = sessionStatusRateLimitedUntil.get(sessionId) ?? 0;
+  if (rateLimitedUntil > now) {
+    return;
+  }
+  if (rateLimitedUntil > 0) {
+    sessionStatusRateLimitedUntil.delete(sessionId);
+  }
+
   const existingSlot = sessionStatusSlots.get(sessionId);
   if (!existingSlot) {
-    const message = await botInstance.api.sendMessage(routeContext.chatId, normalizedText, {
-      disable_notification: true,
-      message_thread_id: routeContext.threadId ?? undefined,
-    });
-    sessionStatusSlots.set(sessionId, { messageId: message.message_id, lastText: normalizedText });
+    try {
+      const message = await botInstance.api.sendMessage(routeContext.chatId, normalizedText, {
+        disable_notification: true,
+        message_thread_id: routeContext.threadId ?? undefined,
+      });
+      sessionStatusSlots.set(sessionId, { messageId: message.message_id, lastText: normalizedText });
+    } catch (error) {
+      const retryAfterSeconds = getRateLimitRetryAfterSeconds(error);
+      if (!retryAfterSeconds) {
+        throw error;
+      }
+
+      sessionStatusRateLimitedUntil.set(sessionId, Date.now() + retryAfterSeconds * 1000);
+      logger.warn(
+        `[Bot] Telegram rate limit while sending status message (session=${sessionId}, retryAfter=${retryAfterSeconds}s)`,
+      );
+      await notifyRateLimitInChat(routeContext, sessionId, retryAfterSeconds);
+    }
     return;
   }
 
@@ -659,6 +739,16 @@ async function updateSessionStatusMessage(sessionId: string, text: string): Prom
     await botInstance.api.editMessageText(routeContext.chatId, existingSlot.messageId, normalizedText);
     sessionStatusSlots.set(sessionId, { ...existingSlot, lastText: normalizedText });
   } catch (error) {
+    const retryAfterSeconds = getRateLimitRetryAfterSeconds(error);
+    if (retryAfterSeconds) {
+      sessionStatusRateLimitedUntil.set(sessionId, Date.now() + retryAfterSeconds * 1000);
+      logger.warn(
+        `[Bot] Telegram rate limit while editing status message (session=${sessionId}, retryAfter=${retryAfterSeconds}s)`,
+      );
+      await notifyRateLimitInChat(routeContext, sessionId, retryAfterSeconds);
+      return;
+    }
+
     if (isMessageNotModifiedError(error)) {
       return;
     }
@@ -717,6 +807,8 @@ async function ensureEventSubscription(directory: string): Promise<void> {
     sessionStatusTasks.clear();
     stopAllThinkingAnimations();
     sessionStatusCompletedAt.clear();
+    sessionStatusRateLimitedUntil.clear();
+    sessionStatusRateLimitNoticeUntil.clear();
   });
 
   summaryAggregator.setOnComplete(async (sessionId, messageText) => {
@@ -777,6 +869,16 @@ async function ensureEventSubscription(directory: string): Promise<void> {
             await botApi.editMessageText(routeContext.chatId, statusSlot.messageId, parts[0]);
             sessionStatusSlots.delete(sessionId);
           } catch (error) {
+            const retryAfterSeconds = getRateLimitRetryAfterSeconds(error);
+            if (retryAfterSeconds) {
+              sessionStatusRateLimitedUntil.set(sessionId, Date.now() + retryAfterSeconds * 1000);
+              logger.warn(
+                `[Bot] Telegram rate limit while sending final response via edit (session=${sessionId}, retryAfter=${retryAfterSeconds}s)`,
+              );
+              await notifyRateLimitInChat(routeContext, sessionId, retryAfterSeconds);
+              return;
+            }
+
             if (!isMessageNotModifiedError(error) && !canRecoverBySendingNewMessage(error)) {
               throw error;
             }
@@ -825,6 +927,16 @@ async function ensureEventSubscription(directory: string): Promise<void> {
         }
       });
     } catch (err) {
+      const retryAfterSeconds = getRateLimitRetryAfterSeconds(err);
+      if (retryAfterSeconds) {
+        sessionStatusRateLimitedUntil.set(sessionId, Date.now() + retryAfterSeconds * 1000);
+        logger.warn(
+          `[Bot] Telegram rate limit while delivering final response (session=${sessionId}, retryAfter=${retryAfterSeconds}s)`,
+        );
+        await notifyRateLimitInChat(routeContext, sessionId, retryAfterSeconds);
+        return;
+      }
+
       logger.error("Failed to send message to Telegram:", err);
       // Stop processing events after critical error to prevent infinite loop
       logger.error("[Bot] CRITICAL: Stopping event processing due to error");
@@ -862,6 +974,10 @@ async function ensureEventSubscription(directory: string): Promise<void> {
   });
 
   summaryAggregator.setOnToolFile(async (fileInfo) => {
+    if (config.bot.hideToolFileMessages) {
+      return;
+    }
+
     if (!botInstance) {
       logger.error("Bot or chat ID not available for sending file");
       return;
