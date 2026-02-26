@@ -1,7 +1,7 @@
-# OpenCode Telegram Bot (Based on Original Project)
+# OpenCode Telegram Bot Topics Edition
 
-[![npm version](https://img.shields.io/npm/v/@grinev/opencode-telegram-bot)](https://www.npmjs.com/package/@grinev/opencode-telegram-bot)
-[![CI](https://github.com/grinev/opencode-telegram-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/grinev/opencode-telegram-bot/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/@cliffren/opencode-telegram-bot-topics)](https://www.npmjs.com/package/@cliffren/opencode-telegram-bot-topics)
+[![CI](https://github.com/cliffren/opencode-telegram-bot-topics/actions/workflows/ci.yml/badge.svg)](https://github.com/cliffren/opencode-telegram-bot-topics/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
 
@@ -82,7 +82,7 @@ opencode serve
 4. Run bot (local repo):
 
 ```bash
-cd /Users/rentao/Projects/opencode-telegram-bot-topics
+cd /path/to/opencode-telegram-bot-topics
 npm install
 npm run build
 node dist/cli.js start
@@ -91,11 +91,17 @@ node dist/cli.js start
 Next runs (after build):
 
 ```bash
-cd /Users/rentao/Projects/opencode-telegram-bot-topics
+cd /path/to/opencode-telegram-bot-topics
 node dist/cli.js start
 ```
 
-Optional (LaunchAgent test service used in this setup):
+Optional (npm package):
+
+```bash
+npx @cliffren/opencode-telegram-bot-topics
+```
+
+Optional (macOS LaunchAgent example):
 
 ```bash
 launchctl kickstart -k gui/$(id -u)/com.opencode.telegram-bot-test

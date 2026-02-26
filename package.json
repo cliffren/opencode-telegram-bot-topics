@@ -1,12 +1,12 @@
 {
-  "name": "@grinev/opencode-telegram-bot",
+  "name": "@cliffren/opencode-telegram-bot-topics",
   "version": "0.7.0",
   "description": "Telegram bot client for OpenCode to run and monitor coding tasks from chat.",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "opencode-telegram": "dist/cli.js",
-    "opencode-telegram-sendfile": "dist/tools/sendfile-request-cli.js"
+    "opencode-telegram-topics": "dist/cli.js",
+    "opencode-telegram-topics-sendfile": "dist/tools/sendfile-request-cli.js"
   },
   "exports": {
     ".": "./dist/index.js",
@@ -35,7 +35,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/grinev/opencode-telegram-bot.git"
+    "url": "git+https://github.com/cliffren/opencode-telegram-bot-topics.git"
   },
   "keywords": [
     "opencode",
@@ -45,12 +45,12 @@
     "developer-tools",
     "cli"
   ],
-  "author": "grinev",
+  "author": "cliffren",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/grinev/opencode-telegram-bot/issues"
+    "url": "https://github.com/cliffren/opencode-telegram-bot-topics/issues"
   },
-  "homepage": "https://github.com/grinev/opencode-telegram-bot#readme",
+  "homepage": "https://github.com/cliffren/opencode-telegram-bot-topics#readme",
   "dependencies": {
     "@grammyjs/menu": "^1.3.1",
     "@opencode-ai/sdk": "^1.1.21",
