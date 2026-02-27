@@ -95,11 +95,6 @@ cd /path/to/opencode-telegram-bot-topics
 node dist/cli.js start
 ```
 
-Optional (npm package):
-
-```bash
-```
-
 Optional (macOS LaunchAgent example):
 
 ```bash
