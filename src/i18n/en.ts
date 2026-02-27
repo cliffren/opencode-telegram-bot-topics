@@ -347,6 +347,11 @@ export const en = {
   "image.sending_to_opencode": "🤖 Sending to OpenCode...",
   "image.sent": "✅ Image sent to OpenCode",
   "image.error": "🔴 Failed to process image: {error}",
+  "file.downloading": "📥 Downloading file...",
+  "file.download_failed": "🔴 Failed to download file",
+  "file.sending_to_opencode": "🤖 Sending file to OpenCode...",
+  "file.sent": "✅ File sent to OpenCode",
+  "file.error": "🔴 Failed to process file: {error}",
 } as const;
 
 export type I18nKey = keyof typeof en;

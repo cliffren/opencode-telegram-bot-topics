@@ -226,7 +226,22 @@ export async function handleImageMessage(ctx: Context, deps: ProcessPromptDeps):
 
   logger.info(`[Image] Processing ${document ? "document" : "image"}: ${fileId}, caption: ${userCaption || "none"}`);
 
-  const statusMessage = await ctx.reply(t("image.downloading"));
+  const statusText = isPhotoMessage
+    ? {
+        downloading: t("image.downloading"),
+        downloadFailed: t("image.download_failed"),
+        sending: t("image.sending_to_opencode"),
+        sent: t("image.sent"),
+        error: (error: string) => t("image.error", { error }),
+      }
+    : {
+        downloading: t("file.downloading"),
+        downloadFailed: t("file.download_failed"),
+        sending: t("file.sending_to_opencode"),
+        sent: t("file.sent"),
+        error: (error: string) => t("file.error", { error }),
+      };
+  const statusMessage = await ctx.reply(statusText.downloading);
 
   try {
     const fileData = await downloadTelegramFile(ctx, fileId);
@@ -234,7 +249,7 @@ export async function handleImageMessage(ctx: Context, deps: ProcessPromptDeps):
       await ctx.api.editMessageText(
         ctx.chat!.id,
         statusMessage.message_id,
-        t("image.download_failed"),
+        statusText.downloadFailed,
       );
       return;
     }
@@ -242,7 +257,7 @@ export async function handleImageMessage(ctx: Context, deps: ProcessPromptDeps):
     await ctx.api.editMessageText(
       ctx.chat!.id,
       statusMessage.message_id,
-      t("image.sending_to_opencode"),
+      statusText.sending,
     );
 
     await fs.mkdir(TEMP_DIR, { recursive: true });
@@ -261,7 +276,7 @@ export async function handleImageMessage(ctx: Context, deps: ProcessPromptDeps):
 
     const promptText = buildPromptText(fileData.filename, mime, userCaption);
 
-    logger.info(`[Image] Sending image to OpenCode: ${fileUrl} (${mime})`);
+    logger.info(`[Image] Sending ${isPhotoMessage ? "image" : "file"} to OpenCode: ${fileUrl} (${mime})`);
 
     const sent = await processUserPrompt(ctx, promptText, deps, [filePart]);
 
@@ -274,7 +289,7 @@ export async function handleImageMessage(ctx: Context, deps: ProcessPromptDeps):
     await ctx.api.editMessageText(
       ctx.chat!.id,
       statusMessage.message_id,
-      t("image.sent"),
+      statusText.sent,
     );
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : "unknown error";
@@ -284,10 +299,10 @@ export async function handleImageMessage(ctx: Context, deps: ProcessPromptDeps):
       await ctx.api.editMessageText(
         ctx.chat!.id,
         statusMessage.message_id,
-        t("image.error", { error: errorMessage }),
+        statusText.error(errorMessage),
       );
     } catch {
-      await ctx.reply(t("image.error", { error: errorMessage })).catch(() => {});
+      await ctx.reply(statusText.error(errorMessage)).catch(() => {});
     }
   }
 }

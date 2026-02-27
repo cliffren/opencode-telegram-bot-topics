@@ -347,4 +347,9 @@ export const ru: I18nDictionary = {
   "image.sending_to_opencode": "🤖 Отправляю в OpenCode...",
   "image.sent": "✅ Изображение отправлено в OpenCode",
   "image.error": "🔴 Не удалось обработать изображение: {error}",
+  "file.downloading": "📥 Загружаю файл...",
+  "file.download_failed": "🔴 Не удалось загрузить файл",
+  "file.sending_to_opencode": "🤖 Отправляю файл в OpenCode...",
+  "file.sent": "✅ Файл отправлен в OpenCode",
+  "file.error": "🔴 Не удалось обработать файл: {error}",
 };

@@ -27,6 +27,9 @@ interface SessionWithChildren {
   children?: SessionWithChildren[];
 }
 
+const SESSION_LIST_MULTIPLIER_FOR_ROOTS = 3;
+const SESSION_LIST_ABSOLUTE_MAX = 200;
+
 function isMessageNotModifiedError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("message is not modified");
 }
@@ -63,8 +66,8 @@ function buildRootSessionMenu(
   rootSessions.forEach((session, index) => {
     const date = new Date(session.time.created).toLocaleDateString(localeForDate);
     const hasChildren = session.children && session.children.length > 0;
-    const childIndicator = hasChildren ? " ▶" : "";
-    const label = `${index + 1}. ${session.title} (${date})${childIndicator}`;
+    const childIndicator = hasChildren ? "▶ " : "";
+    const label = `${childIndicator}${index + 1}. ${session.title} (${date})`;
 
     if (hasChildren) {
       keyboard.text(label, `session:${threadToken}:h:${index}`).row();
@@ -100,9 +103,35 @@ function buildSubSessionMenu(
   return appendInlineMenuCancelButton(keyboard, "session");
 }
 
+async function loadRootSessionsForMenu(directory: string): Promise<SessionWithChildren[]> {
+  const maxRootSessions = config.bot.sessionsListLimit;
+  const fetchLimit = Math.min(
+    Math.max(maxRootSessions * SESSION_LIST_MULTIPLIER_FOR_ROOTS, maxRootSessions),
+    SESSION_LIST_ABSOLUTE_MAX,
+  );
+
+  const { data: sessions, error } = await opencodeClient.session.list({
+    directory,
+    limit: fetchLimit,
+  });
+
+  if (error || !sessions) {
+    throw error || new Error("No data received from server");
+  }
+
+  logger.debug(
+    `[Sessions] Fetched ${sessions.length} sessions (limit=${fetchLimit}) for root menu limit ${maxRootSessions}`,
+  );
+  sessions.forEach((session) => {
+    logger.debug(`[Sessions] Session: ${session.title} | ${session.directory}`);
+  });
+
+  const rootSessions = buildSessionTree(sessions as SessionWithChildren[]);
+  return rootSessions.slice(0, maxRootSessions);
+}
+
 export async function sessionsCommand(ctx: CommandContext<Context>) {
   try {
-    const maxSessions = config.bot.sessionsListLimit;
     const currentProject = getCurrentProject();
 
     if (!currentProject) {
@@ -112,21 +141,9 @@ export async function sessionsCommand(ctx: CommandContext<Context>) {
 
     logger.debug(`[Sessions] Fetching sessions for directory: ${currentProject.worktree}`);
 
-    const { data: sessions, error } = await opencodeClient.session.list({
-      directory: currentProject.worktree,
-      limit: maxSessions,
-    });
+    const rootSessions = await loadRootSessionsForMenu(currentProject.worktree);
 
-    if (error || !sessions) {
-      throw error || new Error("No data received from server");
-    }
-
-    logger.debug(`[Sessions] Found ${sessions.length} sessions`);
-    sessions.forEach((session) => {
-      logger.debug(`[Sessions] Session: ${session.title} | ${session.directory}`);
-    });
-
-    if (sessions.length === 0) {
+    if (rootSessions.length === 0) {
       await ctx.reply(t("sessions.empty"));
       return;
     }
@@ -136,7 +153,6 @@ export async function sessionsCommand(ctx: CommandContext<Context>) {
     const currentThreadId = ctx.message?.message_thread_id ?? null;
     const threadToken = currentThreadId === null ? "none" : String(currentThreadId);
 
-    const rootSessions = buildSessionTree(sessions as SessionWithChildren[]);
     const keyboard = buildRootSessionMenu(rootSessions, threadToken, localeForDate);
 
     await replyWithInlineMenu(ctx, {
@@ -230,16 +246,7 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
     let selectedSession: SessionWithChildren;
 
     if (compactAction !== null && compactRootIndex !== null) {
-      const { data: allSessions, error: listError } = await opencodeClient.session.list({
-        directory: currentProject.worktree,
-        limit: config.bot.sessionsListLimit,
-      });
-
-      if (listError || !allSessions) {
-        throw listError || new Error("Failed to list sessions for compact callback");
-      }
-
-      const rootSessions = buildSessionTree(allSessions as SessionWithChildren[]);
+      const rootSessions = await loadRootSessionsForMenu(currentProject.worktree);
 
       if (compactAction === "b") {
         const rootMenuKeyboard = buildRootSessionMenu(rootSessions, threadToken, localeForDate);
@@ -327,18 +334,11 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
       };
       let mainSessionIndex = 0;
 
-      const { data: allSessions } = await opencodeClient.session.list({
-        directory: currentProject.worktree,
-        limit: config.bot.sessionsListLimit,
-      });
-
-      if (allSessions) {
-        const rootSessions = buildSessionTree(allSessions as SessionWithChildren[]);
-        const foundIndex = rootSessions.findIndex((s) => s.id === selectedSession.id);
-        if (foundIndex >= 0) {
-          mainSessionIndex = foundIndex;
-          mainSessionWithChildren.children = rootSessions[foundIndex]?.children;
-        }
+      const rootSessions = await loadRootSessionsForMenu(currentProject.worktree);
+      const foundIndex = rootSessions.findIndex((s) => s.id === selectedSession.id);
+      if (foundIndex >= 0) {
+        mainSessionIndex = foundIndex;
+        mainSessionWithChildren.children = rootSessions[foundIndex]?.children;
       }
 
       const subMenuKeyboard = buildSubSessionMenu(
@@ -384,34 +384,27 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
     }
 
     if (!childSessionId && action !== "children" && compactAction !== "m" && compactAction !== "c") {
-      const { data: allSessions } = await opencodeClient.session.list({
-        directory: currentProject.worktree,
-        limit: config.bot.sessionsListLimit,
-      });
-
-      if (allSessions) {
-        const rootSessions = buildSessionTree(allSessions as SessionWithChildren[]);
-        const mainSession = rootSessions.find((s) => s.id === selectedSession.id);
-        if (mainSession && mainSession.children && mainSession.children.length > 0) {
-          const mainSessionIndex = rootSessions.findIndex((s) => s.id === selectedSession.id);
-          const subMenuKeyboard = buildSubSessionMenu(
-            mainSession,
-            mainSessionIndex >= 0 ? mainSessionIndex : 0,
-            threadToken,
-            localeForDate,
-          );
-          try {
-            await ctx.editMessageText(t("sessions.select_sub"), {
-              reply_markup: subMenuKeyboard,
-            });
-          } catch (error) {
-            if (!isMessageNotModifiedError(error)) {
-              throw error;
-            }
-            await ctx.answerCallbackQuery();
+      const rootSessions = await loadRootSessionsForMenu(currentProject.worktree);
+      const mainSession = rootSessions.find((s) => s.id === selectedSession.id);
+      if (mainSession && mainSession.children && mainSession.children.length > 0) {
+        const mainSessionIndex = rootSessions.findIndex((s) => s.id === selectedSession.id);
+        const subMenuKeyboard = buildSubSessionMenu(
+          mainSession,
+          mainSessionIndex >= 0 ? mainSessionIndex : 0,
+          threadToken,
+          localeForDate,
+        );
+        try {
+          await ctx.editMessageText(t("sessions.select_sub"), {
+            reply_markup: subMenuKeyboard,
+          });
+        } catch (error) {
+          if (!isMessageNotModifiedError(error)) {
+            throw error;
           }
-          return true;
+          await ctx.answerCallbackQuery();
         }
+        return true;
       }
     }
 
