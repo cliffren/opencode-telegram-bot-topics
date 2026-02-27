@@ -11,6 +11,8 @@ This project is based on [grinev/opencode-telegram-bot](https://github.com/grine
 ## Highlights
 
 - Topic/thread scoped session isolation (`chat + thread`)
+- Per chat/topic scoped model and agent selection
+- Compatible with oh-my-opencode style multi-agent switching
 - Two-level `/sessions` menu (root -> main/sub-sessions)
 - `/delete_sessions` with confirmation flow and cascade delete for main sessions
 - In-place status stream (thinking/tool/final in one message)
