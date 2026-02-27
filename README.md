@@ -33,6 +33,7 @@ Compared to the upstream baseline, this fork adds and improves the following are
 - Main session is clickable in the second-level menu
 - Added `Back` and `Cancel` controls in sub-session menu
 - Improved callback handling stability for nested session selection
+- Added `/delete_sessions` flow with confirmation menu and cascade delete for main sessions
 
 ### 3) Thinking/tool status stream in one message
 
@@ -212,6 +213,7 @@ nssm status opencode-telegram-bot
 - `/new`
 - `/stop`
 - `/sessions`
+- `/delete_sessions`
 - `/projects`
 - `/model`
 - `/agent`
