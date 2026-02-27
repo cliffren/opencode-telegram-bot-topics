@@ -13,7 +13,7 @@ type ParsedArgs = {
 
 function printUsage(): void {
   process.stdout.write(
-    "Usage: opencode-telegram-sendfile <file-path> [--chat-id <id>] [--thread-id <id>]\n",
+    "Usage: opencode-telegram-topics-sendfile <file-path> [--chat-id <id>] [--thread-id <id>]\n",
   );
 }
 

@@ -128,6 +128,16 @@ OpenCode Server
 - **Response language:** Reply in the same language the user uses in their questions.
 - **Clarifications:** If plan confirmation is needed, use the `question` tool. Do not make major decisions (architecture changes, mass deletion, risky changes) without explicit confirmation.
 
+### File delivery to Telegram
+
+- If the user asks to send a generated file back to Telegram, prefer terminal CLI delivery over explaining `/sendfile` usage.
+- Use `opencode-telegram-topics-sendfile <file-path>` as the primary command.
+- Legacy alias `opencode-telegram-sendfile <file-path>` may also exist for compatibility.
+- Before execution, resolve command path with `command -v opencode-telegram-topics-sendfile` (then fallback to alias).
+- If command is not found in `PATH`, fallback to local runner: `node dist/tools/sendfile-request-cli.js <file-path>` from project root.
+- Ensure terminal and bot service share `OPENCODE_TELEGRAM_RUNTIME_MODE` and `OPENCODE_TELEGRAM_HOME`.
+- Always pass a concrete file path and confirm success/failure after execution.
+
 ### Git
 
 - **Commits:** Never create commits automatically. Commit only when the user explicitly asks.

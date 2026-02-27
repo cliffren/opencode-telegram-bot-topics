@@ -56,10 +56,23 @@ OPENCODE_MODEL_ID=big-pickle
 opencode serve
 ```
 
-### 4) Build and run the bot
+### 4) Build and expose CLI commands globally (required)
 
 ```bash
 npm run build
+npm link
+```
+
+Verify sendfile command is available from any directory:
+
+```bash
+command -v opencode-telegram-topics-sendfile
+opencode-telegram-topics-sendfile --help
+```
+
+### 5) Run the bot
+
+```bash
 node dist/cli.js start
 ```
 
@@ -111,6 +124,8 @@ Voice transcription (optional):
 - `STT_LANGUAGE`
 
 ## Service Setup
+
+Important: terminal `opencode-telegram-topics-sendfile` and bot service must share the same runtime values (`OPENCODE_TELEGRAM_RUNTIME_MODE`, `OPENCODE_TELEGRAM_HOME`) so they read/write the same sendfile queue.
 
 ### macOS (LaunchAgent)
 
@@ -220,6 +235,39 @@ nssm status opencode-telegram-bot
 - `/screenshot`
 - `/sendfile`
 - `/help`
+
+## Terminal Sendfile CLI (for model-driven delivery)
+
+If you want fully natural-language workflows where the model decides to send files by itself,
+use the terminal queue CLI instead of relying only on `/sendfile` text commands.
+
+Primary command:
+
+```bash
+opencode-telegram-topics-sendfile <file-path>
+```
+
+Compatibility alias:
+
+```bash
+opencode-telegram-sendfile <file-path>
+```
+
+Optional routing target:
+
+```bash
+opencode-telegram-topics-sendfile <file-path> --chat-id <id> --thread-id <id>
+```
+
+Important: the CLI writer and running bot must use the same runtime paths.
+Keep these environment values aligned between terminal and service:
+
+- `OPENCODE_TELEGRAM_RUNTIME_MODE`
+- `OPENCODE_TELEGRAM_HOME`
+
+Queue is consumed from `<app_home>/run/sendfile-requests` by default.
+
+If you deploy from source, run `npm link` once during first setup so this command is globally available even when the current working directory is not the repository.
 
 ## Troubleshooting
 
