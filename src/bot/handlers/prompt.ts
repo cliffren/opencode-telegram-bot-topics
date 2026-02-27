@@ -193,10 +193,16 @@ function isSendFileIntent(text: string): boolean {
   const normalized = text.toLowerCase();
   const zhFileTerms = "文件|文档|图片|照片|截图|图|pdf|ppt|pptx|slides|幻灯片|excel|表格|word|txt|文本";
   return (
-    /(send|share|deliver).*(file|document|image|photo|screenshot|pic|pdf|ppt|pptx|slides|excel|spreadsheet|table|word|txt).*(telegram|chat|me)/i.test(
+    /(send|share|deliver).*(file|document|image|photo|screenshot|pic|pdf|ppt|pptx|slides|excel|spreadsheet|table|word|txt|artifacts?).*(telegram|chat|me)/i.test(
       normalized,
     ) ||
-    /(file|document|image|photo|screenshot|pic|pdf|ppt|pptx|slides|excel|spreadsheet|table|word|txt).*(send|share|deliver).*(telegram|chat|me)/i.test(
+    /(file|document|image|photo|screenshot|pic|pdf|ppt|pptx|slides|excel|spreadsheet|table|word|txt|artifacts?).*(send|share|deliver).*(telegram|chat|me)/i.test(
+      normalized,
+    ) ||
+    /(send|share|deliver).*(telegram|chat|me).*(file|document|image|photo|screenshot|pic|pdf|ppt|pptx|slides|excel|spreadsheet|table|word|txt|artifacts?)/i.test(
+      normalized,
+    ) ||
+    /(send|share|deliver)\s+(me\s+)?(the\s+)?(files?|documents?|images?|photos?|screenshots?|pics?|pdf|pptx?|slides?|excel|spreadsheets?|tables?|word|txt|artifacts?)(\s+files?)?/i.test(
       normalized,
     ) ||
     new RegExp(`(发送|发|传).*(${zhFileTerms}).*(给我|到telegram|到群|到聊天)`).test(text) ||
@@ -206,7 +212,13 @@ function isSendFileIntent(text: string): boolean {
     /(отправь|скинь|пришли|передай).*(файл|документ|картинк|изображени|скриншот).*(мне|в\s*telegram|в\s*чат)/i.test(
       normalized,
     ) ||
+    /(отправь|скинь|пришли|передай).*(мне|в\s*telegram|в\s*чат).*(файл|документ|картинк|изображени|скриншот|pdf|ppt|pptx|slides|excel|таблиц|word|txt)/i.test(
+      normalized,
+    ) ||
     /(файл|документ|картинк|изображени|скриншот).*(отправь|скинь|пришли|передай).*(мне|в\s*telegram|в\s*чат)/i.test(
+      normalized,
+    ) ||
+    /(пришли|отправь|скинь)\s+мне\s+(файлы?|документы?|картинки|изображения|скриншоты|слайды|таблицы|pdf|pptx?|excel|word|txt)/i.test(
       normalized,
     ) ||
     /(артефакт|артефакты|artifacts?).*(отправь|скинь|пришли).*(мне|в\s*чат|в\s*telegram)/i.test(
