@@ -98,7 +98,6 @@ node dist/cli.js start
 Optional (npm package):
 
 ```bash
-npx @cliffren/opencode-telegram-bot-topics
 ```
 
 Optional (macOS LaunchAgent example):
