@@ -191,13 +191,18 @@ type PromptPartInput = { type: "text"; text: string } | PromptFilePartInput;
 
 function isSendFileIntent(text: string): boolean {
   const normalized = text.toLowerCase();
+  const zhFileTerms = "文件|文档|图片|照片|截图|图|pdf|ppt|pptx|slides|幻灯片|excel|表格|word|txt|文本";
   return (
-    /(send|share|deliver).*(file|document|image|photo|screenshot|pic).*(telegram|chat|me)/i.test(normalized) ||
-    /(file|document|image|photo|screenshot|pic).*(send|share|deliver).*(telegram|chat|me)/i.test(normalized) ||
-    /(发送|发|传).*(文件|文档|图片|照片|截图).*(给我|到telegram|到群|到聊天)/.test(text) ||
-    /(把|将).*(文件|文档|图片|照片|截图).*(发送|发|传).*(给我|到telegram|到群|到聊天)/.test(text) ||
-    /(发给我|传给我).*(文件|文档|图片|照片|截图|artifact|artifacts)/i.test(text) ||
-    /(文件|文档|图片|照片|截图|artifact|artifacts).*(发给我|传给我)/i.test(text) ||
+    /(send|share|deliver).*(file|document|image|photo|screenshot|pic|pdf|ppt|pptx|slides|excel|spreadsheet|table|word|txt).*(telegram|chat|me)/i.test(
+      normalized,
+    ) ||
+    /(file|document|image|photo|screenshot|pic|pdf|ppt|pptx|slides|excel|spreadsheet|table|word|txt).*(send|share|deliver).*(telegram|chat|me)/i.test(
+      normalized,
+    ) ||
+    new RegExp(`(发送|发|传).*(${zhFileTerms}).*(给我|到telegram|到群|到聊天)`).test(text) ||
+    new RegExp(`(把|将).*(${zhFileTerms}).*(发送|发|传).*(给我|到telegram|到群|到聊天)`).test(text) ||
+    new RegExp(`(发给我|传给我).*(${zhFileTerms}|artifact|artifacts)`, "i").test(text) ||
+    new RegExp(`(${zhFileTerms}|artifact|artifacts).*(发给我|传给我)`, "i").test(text) ||
     /(отправь|скинь|пришли|передай).*(файл|документ|картинк|изображени|скриншот).*(мне|в\s*telegram|в\s*чат)/i.test(
       normalized,
     ) ||
