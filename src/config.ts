@@ -132,7 +132,7 @@ export const config = {
     hideToolFileMessages: getOptionalBooleanEnvVar("HIDE_TOOL_FILE_MESSAGES", true),
   },
   files: {
-    maxFileSizeKb: parseInt(getEnvVar("CODE_FILE_MAX_SIZE_KB", false) || "100", 10),
+    maxFileSizeKb: parseInt(getEnvVar("CODE_FILE_MAX_SIZE_KB", false) || "20480", 10),
     autoSendImagesDir: getEnvVar("AUTO_SEND_IMAGES_DIR", false),
     tempDir: getEnvVar("TEMP_DIR", false) || undefined,
   },
