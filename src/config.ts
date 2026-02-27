@@ -139,6 +139,8 @@ export const config = {
   external: {
     sendFileRequestsDir: getEnvVar("SEND_FILE_REQUESTS_DIR", false) || undefined,
     sendFileRequestPollIntervalMs: getOptionalNonNegativeIntEnvVar("SEND_FILE_REQUEST_POLL_INTERVAL_MS", 2000),
+    sendFileCliBinDir: getEnvVar("SEND_FILE_CLI_BIN_DIR", false) || undefined,
+    sendFileCliCommand: getEnvVar("SEND_FILE_CLI_COMMAND", false) || "opencode-telegram-topics-sendfile",
   },
   stt: {
     apiUrl: getEnvVar("STT_API_URL", false),

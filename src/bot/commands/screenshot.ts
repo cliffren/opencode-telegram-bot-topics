@@ -122,7 +122,7 @@ export async function captureAndSendScreenshot(ctx: Context): Promise<boolean> {
     await ctx.api.editMessageText(
       ctx.chat!.id,
       status.message_id,
-      t("screenshot.sent", { path: outputPath }),
+      t("screenshot.sent"),
     );
 
     logger.info(`[Screenshot] Captured and sent: ${outputPath}`);

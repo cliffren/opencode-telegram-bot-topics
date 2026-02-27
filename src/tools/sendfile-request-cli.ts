@@ -9,11 +9,12 @@ type ParsedArgs = {
   filePath: string;
   chatId?: number;
   threadId?: number;
+  verbose: boolean;
 };
 
 function printUsage(): void {
   process.stdout.write(
-    "Usage: opencode-telegram-topics-sendfile <file-path> [--chat-id <id>] [--thread-id <id>]\n",
+    "Usage: opencode-telegram-topics-sendfile <file-path> [--chat-id <id>] [--thread-id <id>] [--verbose]\n",
   );
 }
 
@@ -29,6 +30,7 @@ function parseArgs(argv: string[]): ParsedArgs | null {
 
   let chatId: number | undefined;
   let threadId: number | undefined;
+  let verbose = false;
 
   for (let i = 1; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -52,10 +54,15 @@ function parseArgs(argv: string[]): ParsedArgs | null {
       continue;
     }
 
+    if (arg === "--verbose" || arg === "-v") {
+      verbose = true;
+      continue;
+    }
+
     throw new Error(`Unknown argument: ${arg}`);
   }
 
-  return { filePath, chatId, threadId };
+  return { filePath, chatId, threadId, verbose };
 }
 
 function buildRequestFilePath(): string {
@@ -85,10 +92,12 @@ async function main(): Promise<void> {
   };
 
   await fs.writeFile(requestPath, `${JSON.stringify(payload)}\n`, "utf-8");
-  process.stdout.write(`Queued send-file request: ${parsed.filePath}\n`);
+  if (parsed.verbose) {
+    process.stdout.write(`Queued send-file request: ${parsed.filePath}\n`);
+  }
 }
 
 main().catch((error) => {
-  process.stderr.write(`opencode-telegram-sendfile failed: ${(error as Error).message}\n`);
+  process.stderr.write(`opencode-telegram-topics-sendfile failed: ${(error as Error).message}\n`);
   process.exitCode = 1;
 });

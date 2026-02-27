@@ -70,6 +70,22 @@ command -v opencode-telegram-topics-sendfile
 opencode-telegram-topics-sendfile --help
 ```
 
+Set CLI discovery env vars (recommended, dynamic per machine):
+
+macOS/Linux:
+
+```bash
+echo "SEND_FILE_CLI_BIN_DIR=$(npm prefix -g)/bin" >> .env
+echo "SEND_FILE_CLI_COMMAND=opencode-telegram-topics-sendfile" >> .env
+```
+
+Windows PowerShell:
+
+```powershell
+Add-Content .env "SEND_FILE_CLI_BIN_DIR=$((npm prefix -g))"
+Add-Content .env "SEND_FILE_CLI_COMMAND=opencode-telegram-topics-sendfile"
+```
+
 ### 5) Run the bot
 
 ```bash
@@ -115,6 +131,8 @@ See `.env.example` for the full list. Most important settings:
 - `HIDE_THINKING_MESSAGES`
 - `HIDE_TOOL_CALL_MESSAGES`
 - `HIDE_TOOL_FILE_MESSAGES`
+- `SEND_FILE_CLI_BIN_DIR`
+- `SEND_FILE_CLI_COMMAND`
 
 Voice transcription (optional):
 
@@ -266,6 +284,8 @@ Keep these environment values aligned between terminal and service:
 - `OPENCODE_TELEGRAM_HOME`
 
 Queue is consumed from `<app_home>/run/sendfile-requests` by default.
+
+Model-side command guidance uses `SEND_FILE_CLI_COMMAND` and `SEND_FILE_CLI_BIN_DIR` (if set) to generate platform-specific command hints.
 
 If you deploy from source, run `npm link` once during first setup so this command is globally available even when the current working directory is not the repository.
 

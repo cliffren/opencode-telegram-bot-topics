@@ -263,6 +263,34 @@ function parseAutoSendFilePathsFromAssistantText(text: string): string[] {
   return extractAutoSendCandidatePaths(text).slice(0, MAX_AUTO_FILES_PER_MESSAGE);
 }
 
+function isSendFileAckOnly(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  if (/^queued\s+send-file\s+request:/i.test(normalized)) {
+    return true;
+  }
+
+  const hasAckPhrase =
+    /(queued\s+send-file\s+request|sent|send completed|already sent|已执行发送|已经执行发送|已发送|发送完成)/i.test(
+      normalized,
+    );
+  if (!hasAckPhrase) {
+    return false;
+  }
+
+  const hasPathLikeToken =
+    FILE_PATH_GENERIC_REGEX.test(normalized) || FILE_PATH_IN_BACKTICKS_REGEX.test(normalized);
+  if (!hasPathLikeToken) {
+    return false;
+  }
+
+  const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.length <= 3;
+}
+
 function cleanupExpiredSendFileSelections(): void {
   const now = Date.now();
   for (const [token, selection] of pendingSendFileSelections.entries()) {
@@ -830,6 +858,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 
     try {
       const { sanitizedText, filePaths } = parseSendFileDirectives(messageText);
+      let autoFilePaths: string[] = [];
 
       if (filePaths.length > 0) {
         await sendRequestedFiles(
@@ -842,7 +871,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       }
 
       if (filePaths.length === 0) {
-        const autoFilePaths = parseAutoSendFilePathsFromAssistantText(messageText);
+        autoFilePaths = parseAutoSendFilePathsFromAssistantText(messageText);
         if (autoFilePaths.length > 0) {
           logger.info(`[Bot] Auto-send detected file paths: ${autoFilePaths.join(", ")}`);
           await sendRequestedFiles(
@@ -855,7 +884,10 @@ async function ensureEventSubscription(directory: string): Promise<void> {
         }
       }
 
-      const textToSend = sanitizedText.length > 0 ? sanitizedText : filePaths.length > 0 ? "" : messageText;
+      const sendFileTriggered = filePaths.length > 0 || autoFilePaths.length > 0;
+      const candidateText = sanitizedText.length > 0 ? sanitizedText : filePaths.length > 0 ? "" : messageText;
+      const textToSend =
+        sendFileTriggered && isSendFileAckOnly(candidateText) ? "" : candidateText;
       const parts = textToSend ? formatSummary(textToSend) : [];
 
       logger.debug(
@@ -1245,11 +1277,7 @@ export function createBot(): Bot<Context> {
   setInterval(() => {
     cleanupExpiredSendFileSelections();
 
-    if (!botInstance) {
-      return;
-    }
-
-    void processExternalSendFileRequests(botInstance, chatIdInstance, threadIdInstance);
+    void processExternalSendFileRequests(bot, chatIdInstance, threadIdInstance);
   }, config.external.sendFileRequestPollIntervalMs);
 
   // Log all API calls for diagnostics

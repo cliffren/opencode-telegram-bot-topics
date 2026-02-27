@@ -325,7 +325,7 @@ export const en = {
   "sendfile.choice.failed": "🔴 Failed to send selected file for `{path}`",
 
   "screenshot.capturing": "📸 Capturing screenshot...",
-  "screenshot.sent": "✅ Screenshot captured and sent\n`{path}`",
+  "screenshot.sent": "✅ Screenshot captured and sent",
   "screenshot.failed":
     "🔴 Failed to capture screenshot. Please grant Screen Recording permission and try again.",
   "screenshot.failed_thread":

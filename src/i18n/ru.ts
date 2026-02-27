@@ -324,7 +324,7 @@ export const ru: I18nDictionary = {
   "sendfile.choice.failed": "🔴 Не удалось отправить выбранный файл для `{path}`",
 
   "screenshot.capturing": "📸 Делаю скриншот...",
-  "screenshot.sent": "✅ Скриншот сделан и отправлен\n`{path}`",
+  "screenshot.sent": "✅ Скриншот сделан и отправлен",
   "screenshot.failed":
     "🔴 Не удалось сделать скриншот. Разрешите доступ к записи экрана и повторите попытку.",
   "screenshot.failed_thread":

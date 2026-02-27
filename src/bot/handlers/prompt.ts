@@ -16,6 +16,7 @@ import { keyboardManager } from "../../keyboard/manager.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { stopEventListening } from "../../opencode/events.js";
+import { config } from "../../config.js";
 import { interactionManager } from "../../interaction/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
 import { safeBackgroundTask } from "../../utils/safe-background-task.js";
@@ -30,6 +31,14 @@ let threadIdInstance: number | null = null;
 
 /** Chat/thread scoped session mapping for Topic + private isolation */
 const scopedSessionMap = new Map<string, { id: string; title: string; directory: string }>();
+
+interface PendingSendFileIntent {
+  createdAt: number;
+  sourceText: string;
+}
+
+const pendingSendFileIntentByScope = new Map<string, PendingSendFileIntent>();
+const PENDING_SEND_FILE_TTL_MS = 3 * 60 * 1000;
 
 function getSessionScopeKey(chatId: number | null, threadId: number | null): string {
   return `${chatId ?? "none"}:${threadId ?? "private"}`;
@@ -179,6 +188,137 @@ export type PromptFilePartInput = {
 };
 
 type PromptPartInput = { type: "text"; text: string } | PromptFilePartInput;
+
+function isSendFileIntent(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return (
+    /(send|share|deliver).*(file|document|image|photo|screenshot|pic).*(telegram|chat|me)/i.test(normalized) ||
+    /(file|document|image|photo|screenshot|pic).*(send|share|deliver).*(telegram|chat|me)/i.test(normalized) ||
+    /(发送|发|传).*(文件|文档|图片|照片|截图).*(给我|到telegram|到群|到聊天)/.test(text) ||
+    /(把|将).*(文件|文档|图片|照片|截图).*(发送|发|传).*(给我|到telegram|到群|到聊天)/.test(text) ||
+    /(发给我|传给我).*(文件|文档|图片|照片|截图|artifact|artifacts)/i.test(text) ||
+    /(文件|文档|图片|照片|截图|artifact|artifacts).*(发给我|传给我)/i.test(text) ||
+    /(отправь|скинь|пришли|передай).*(файл|документ|картинк|изображени|скриншот).*(мне|в\s*telegram|в\s*чат)/i.test(
+      normalized,
+    ) ||
+    /(файл|документ|картинк|изображени|скриншот).*(отправь|скинь|пришли|передай).*(мне|в\s*telegram|в\s*чат)/i.test(
+      normalized,
+    ) ||
+    /(артефакт|артефакты|artifacts?).*(отправь|скинь|пришли).*(мне|в\s*чат|в\s*telegram)/i.test(
+      normalized,
+    )
+  );
+}
+
+function isSendFileConfirmation(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return (
+    /^(发吧|发送吧|发过去|传吧|就发这个|发一下|发下|现在发|可以发了|执行吧|继续)$/i.test(text.trim()) ||
+    /^(send it|send now|go ahead|do it|proceed|execute)$/i.test(normalized) ||
+    /^(отправь|скинь|давай|выполняй|выполни|продолжай|ок\b|поехали)$/i.test(normalized)
+  );
+}
+
+function getFreshPendingSendFileIntent(scopeKey: string): PendingSendFileIntent | null {
+  const pending = pendingSendFileIntentByScope.get(scopeKey);
+  if (!pending) {
+    return null;
+  }
+
+  if (Date.now() - pending.createdAt > PENDING_SEND_FILE_TTL_MS) {
+    pendingSendFileIntentByScope.delete(scopeKey);
+    return null;
+  }
+
+  return pending;
+}
+
+function getSendFileInstructionByPlatform(): string {
+  const primaryCommand = config.external.sendFileCliCommand;
+  const fallbackCommand = "opencode-telegram-sendfile";
+  const configuredBinDir = config.external.sendFileCliBinDir?.trim();
+  const runtimeMode = process.env.OPENCODE_TELEGRAM_RUNTIME_MODE?.trim();
+  const runtimeHome = process.env.OPENCODE_TELEGRAM_HOME?.trim();
+
+  if (process.platform === "win32") {
+    const pathPatchCommand = configuredBinDir
+      ? `$env:Path = \"${configuredBinDir};$env:Path\"`
+      : "$env:Path = \"$env:APPDATA\\npm;$env:Path\"";
+    const runtimePatchParts: string[] = [];
+    if (runtimeMode) {
+      runtimePatchParts.push(`$env:OPENCODE_TELEGRAM_RUNTIME_MODE = \"${runtimeMode}\"`);
+    }
+    if (runtimeHome) {
+      runtimePatchParts.push(`$env:OPENCODE_TELEGRAM_HOME = \"${runtimeHome}\"`);
+    }
+    const runtimePatchCommand = runtimePatchParts.join("; ");
+    const fullRunCommand = [runtimePatchCommand, pathPatchCommand, `${primaryCommand} <file-path>`]
+      .filter((part) => part.length > 0)
+      .join("; ");
+
+    return [
+      "When user asks to send a file to Telegram, execute CLI (do not explain /sendfile).",
+      `Run: ${fullRunCommand}`,
+      `Fallback: ${fallbackCommand} <file-path>`,
+      "After execution, reply with a minimal confirmation.",
+      "If still unavailable, report exact command/path error.",
+    ].join("\n");
+  }
+
+  const pathPatchCommand = configuredBinDir
+    ? `export PATH=\"${configuredBinDir}:$PATH\"`
+    : 'export PATH="$HOME/.npm-global/bin:$PATH"';
+  const runtimePatchParts: string[] = [];
+  if (runtimeMode) {
+    runtimePatchParts.push(`export OPENCODE_TELEGRAM_RUNTIME_MODE=\"${runtimeMode}\"`);
+  }
+  if (runtimeHome) {
+    runtimePatchParts.push(`export OPENCODE_TELEGRAM_HOME=\"${runtimeHome}\"`);
+  }
+  const runtimePatchCommand = runtimePatchParts.join(" && ");
+  const fullRunCommand = [runtimePatchCommand, pathPatchCommand, `${primaryCommand} <file-path>`]
+    .filter((part) => part.length > 0)
+    .join(" && ");
+
+  return [
+    "When user asks to send a file to Telegram, execute CLI (do not explain /sendfile).",
+    `Run: ${fullRunCommand}`,
+    `Fallback: ${fallbackCommand} <file-path>`,
+    "After execution, reply with a minimal confirmation.",
+    "If still unavailable, report exact command/path error.",
+  ].join("\n");
+}
+
+function maybeAugmentPromptForSendFileIntent(
+  text: string,
+  scopeKey: string,
+): { promptText: string; injected: boolean } {
+  const directIntent = isSendFileIntent(text);
+  if (directIntent) {
+    pendingSendFileIntentByScope.set(scopeKey, {
+      createdAt: Date.now(),
+      sourceText: text,
+    });
+  }
+
+  const pendingIntent = getFreshPendingSendFileIntent(scopeKey);
+  const confirmationIntent = isSendFileConfirmation(text) && pendingIntent !== null;
+
+  if (!directIntent && !confirmationIntent) {
+    return { promptText: text, injected: false };
+  }
+
+  const effectiveUserRequest = confirmationIntent && pendingIntent ? pendingIntent.sourceText : text;
+  if (confirmationIntent) {
+    pendingSendFileIntentByScope.delete(scopeKey);
+  }
+
+  const instruction = getSendFileInstructionByPlatform();
+  return {
+    promptText: `${instruction}\n\nUser request:\n${effectiveUserRequest}`,
+    injected: true,
+  };
+}
 
 /**
  * Processes a user prompt: ensures project/session, subscribes to events, and sends
@@ -330,6 +470,14 @@ export async function processUserPrompt(
     const currentAgent = getStoredAgent(currentThreadId, ctx.chat?.id ?? null);
     const storedModel = getStoredModel(currentThreadId, ctx.chat?.id ?? null);
 
+    const scopeKey = getSessionScopeKey(ctx.chat?.id ?? null, currentThreadId);
+    const sendFileAugmentation = maybeAugmentPromptForSendFileIntent(text, scopeKey);
+    const promptText = sendFileAugmentation.promptText;
+
+    if (sendFileAugmentation.injected) {
+      logger.info("[Prompt] Injected sendfile CLI guidance for model prompt");
+    }
+
     const promptOptions: {
       sessionID: string;
       directory: string;
@@ -340,7 +488,7 @@ export async function processUserPrompt(
     } = {
       sessionID: currentSession.id,
       directory: currentSession.directory,
-      parts: [{ type: "text", text }, ...extraParts],
+      parts: [{ type: "text", text: promptText }, ...extraParts],
       agent: currentAgent,
     };
 
