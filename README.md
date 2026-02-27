@@ -1,144 +1,171 @@
-# OpenCode Telegram Bot Topics Edition
+# OpenCode Telegram Bot Topics
 
 [![npm version](https://img.shields.io/npm/v/@cliffren/opencode-telegram-bot-topics)](https://www.npmjs.com/package/@cliffren/opencode-telegram-bot-topics)
-[![CI](https://github.com/cliffren/opencode-telegram-bot-topics/actions/workflows/ci.yml/badge.svg)](https://github.com/cliffren/opencode-telegram-bot-topics/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
 
-This repository is developed on top of the original OpenCode Telegram Bot and focuses on practical workflow upgrades for daily Telegram usage.
+Telegram bot client for OpenCode. It lets you run and monitor coding tasks from Telegram chats/topics.
 
-## Upstream base
+This project is based on [grinev/opencode-telegram-bot](https://github.com/grinev/opencode-telegram-bot), with additional workflow and session UX improvements.
 
-This project is based on:
+## Highlights
 
-- [grinev/opencode-telegram-bot](https://github.com/grinev/opencode-telegram-bot)
+- Topic/thread scoped session isolation (`chat + thread`)
+- Two-level `/sessions` menu (root -> main/sub-sessions)
+- `/delete_sessions` with confirmation flow and cascade delete for main sessions
+- In-place status stream (thinking/tool/final in one message)
+- Better Telegram file/document handling for prompt input
+- Voice/audio transcription support (Whisper-compatible API)
 
-Huge thanks to the original maintainers for the core architecture and feature foundation.
+## Requirements
 
-## What we updated
+- Node.js 20+
+- A Telegram bot token from `@BotFather`
+- Your Telegram numeric user ID (allowlist)
+- OpenCode server running (`opencode serve`)
 
-Compared to the upstream baseline, this fork adds and improves the following areas.
+## Quick Start
 
-### 1) Topic/thread isolation
+### 1) Clone and install
 
-- Session selection is isolated by `chat + thread` scope
-- Better separation between topics in Telegram forum/group workflows
-- Reduced risk of context bleed between unrelated conversations
+```bash
+git clone https://github.com/cliffren/opencode-telegram-bot-topics.git
+cd opencode-telegram-bot-topics
+npm install
+```
 
-### 2) Session UX improvements
+### 2) Create `.env`
 
-- Two-level `/sessions` menu:
-  - Level 1: root sessions
-  - Level 2: main session + sub-sessions
-- Main session is clickable in the second-level menu
-- Added `Back` and `Cancel` controls in sub-session menu
-- Improved callback handling stability for nested session selection
-- Added `/delete_sessions` flow with confirmation menu and cascade delete for main sessions
+Copy `.env.example` to `.env` and set required values.
 
-### 3) Thinking/tool status stream in one message
+Required minimum:
 
-- Thinking and tool calls are shown in a single in-place updated status message
-- Final model response replaces the status message when possible
-- Compact one-line tool preview for mobile readability
-- Added guards for late tool events after final response
+```env
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_ALLOWED_USER_ID=...
 
-### 4) Media and file handling upgrades
+OPENCODE_MODEL_PROVIDER=opencode
+OPENCODE_MODEL_ID=big-pickle
+```
 
-- Better handling of Telegram `document` messages as generic files
-- Document flow is no longer forced into image-only prompt behavior
-- Existing image flow remains supported
-- Voice/audio transcription flow retained and integrated with prompt routing
-
-### 5) Telegram usability additions
-
-- Natural-language screenshot requests supported
-- Natural-language send-file requests supported
-- Inline file candidate selection when multiple paths match
-
-### 6) Compatibility with oh-my-opencode ecosystem
-
-- Improved agent/tool naming compatibility for oh-my-opencode style plugins and agent IDs
-- Better handling for hyphenated/custom agent identifiers in Telegram callbacks
-- Keeps tool/status rendering stable when extended toolchains are used
-
-## Core capabilities (inherited + enhanced)
-
-- Remote prompting to local OpenCode from Telegram
-- Session/project/model/agent controls
-- Inline question and permission workflows
-- Pinned context/status updates
-- Secure user allowlist with `TELEGRAM_ALLOWED_USER_ID`
-
-## Quick start
-
-1. Create bot token in `@BotFather`
-2. Get your Telegram numeric user ID
-3. Start OpenCode server:
+### 3) Start OpenCode server
 
 ```bash
 opencode serve
 ```
 
-4. Run bot (local repo):
+### 4) Build and run the bot
 
 ```bash
-cd /path/to/opencode-telegram-bot-topics
-npm install
 npm run build
 node dist/cli.js start
 ```
 
-Next runs (after build):
+## How Connection Works (OpenCode Port / Binding)
+
+The bot connects to OpenCode via HTTP API URL:
+
+- `OPENCODE_API_URL` (default: `http://localhost:4096`)
+
+If your `opencode serve` runs on another port, set it explicitly:
+
+```env
+OPENCODE_API_URL=http://127.0.0.1:7777
+```
+
+If OpenCode server auth is enabled, also configure:
+
+```env
+OPENCODE_SERVER_USERNAME=opencode
+OPENCODE_SERVER_PASSWORD=your_password
+```
+
+So yes, port matters; it is bound through `OPENCODE_API_URL`.
+
+## Configuration
+
+See `.env.example` for the full list. Most important settings:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_ALLOWED_USER_ID`
+- `OPENCODE_API_URL`
+- `OPENCODE_SERVER_USERNAME`
+- `OPENCODE_SERVER_PASSWORD`
+- `OPENCODE_MODEL_PROVIDER`
+- `OPENCODE_MODEL_ID`
+- `SESSIONS_LIST_LIMIT`
+- `PROJECTS_LIST_LIMIT`
+- `BOT_LOCALE`
+- `SERVICE_MESSAGES_INTERVAL_SEC`
+- `HIDE_THINKING_MESSAGES`
+- `HIDE_TOOL_CALL_MESSAGES`
+- `HIDE_TOOL_FILE_MESSAGES`
+
+Voice transcription (optional):
+
+- `STT_API_URL`
+- `STT_API_KEY`
+- `STT_MODEL`
+- `STT_LANGUAGE`
+
+## Service Setup
+
+### macOS (LaunchAgent)
+
+Create `~/Library/LaunchAgents/com.opencode.telegram-bot.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.opencode.telegram-bot</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/path/to/opencode-telegram-bot-topics/dist/cli.js</string>
+    <string>start</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/path/to/opencode-telegram-bot-topics</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>OPENCODE_TELEGRAM_RUNTIME_MODE</key>
+    <string>installed</string>
+    <key>OPENCODE_TELEGRAM_HOME</key>
+    <string>/Users/youruser/Library/Application Support/opencode-telegram-bot</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/youruser/Library/Logs/opencode-telegram-bot.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/youruser/Library/Logs/opencode-telegram-bot.log</string>
+</dict>
+</plist>
+```
+
+Load/restart/check:
 
 ```bash
-cd /path/to/opencode-telegram-bot-topics
-node dist/cli.js start
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.opencode.telegram-bot.plist
+launchctl kickstart -k gui/$(id -u)/com.opencode.telegram-bot
+launchctl print gui/$(id -u)/com.opencode.telegram-bot
 ```
 
-Optional (macOS LaunchAgent example):
+### Linux (systemd user service)
 
-```bash
-launchctl kickstart -k gui/$(id -u)/com.opencode.telegram-bot-test
-launchctl print gui/$(id -u)/com.opencode.telegram-bot-test
-```
-
-Linux (manual run):
-
-```bash
-cd /path/to/opencode-telegram-bot-topics
-npm install
-npm run build
-node dist/cli.js start
-```
-
-Linux (systemd user service, optional):
-
-```bash
-systemctl --user restart opencode-telegram-bot
-journalctl --user -u opencode-telegram-bot -f
-```
-
-Windows (manual run, PowerShell):
-
-```powershell
-cd C:\path\to\opencode-telegram-bot-topics
-npm install
-npm run build
-node dist\cli.js start
-```
-
-Windows (service via NSSM, optional):
-
-```powershell
-nssm restart opencode-telegram-bot
-nssm status opencode-telegram-bot
-```
-
-## Service setup examples
-
-Linux (systemd user service, recommended):
-
-1. Create service file: `~/.config/systemd/user/opencode-telegram-bot.service`
+Create `~/.config/systemd/user/opencode-telegram-bot.service`:
 
 ```ini
 [Unit]
@@ -158,56 +185,26 @@ Environment=OPENCODE_TELEGRAM_RUNTIME_MODE=installed
 WantedBy=default.target
 ```
 
-2. Reload and start:
+Enable and check:
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now opencode-telegram-bot
-```
-
-3. Manage service:
-
-```bash
-systemctl --user restart opencode-telegram-bot
 systemctl --user status opencode-telegram-bot
 journalctl --user -u opencode-telegram-bot -f
 ```
 
-Windows (service via NSSM, recommended):
-
-1. Install service:
+### Windows (NSSM)
 
 ```powershell
 nssm install opencode-telegram-bot "C:\Program Files\nodejs\node.exe" "C:\path\to\opencode-telegram-bot-topics\dist\cli.js" start
-```
-
-2. Set working directory:
-
-```powershell
 nssm set opencode-telegram-bot AppDirectory "C:\path\to\opencode-telegram-bot-topics"
-```
-
-3. Set environment variables (optional but recommended):
-
-```powershell
 nssm set opencode-telegram-bot AppEnvironmentExtra "OPENCODE_TELEGRAM_HOME=C:\Users\YourUser\AppData\Roaming\opencode-telegram-bot" "OPENCODE_TELEGRAM_RUNTIME_MODE=installed"
-```
-
-4. Start and enable auto-start:
-
-```powershell
 nssm start opencode-telegram-bot
-nssm set opencode-telegram-bot Start SERVICE_AUTO_START
-```
-
-5. Manage service:
-
-```powershell
-nssm restart opencode-telegram-bot
 nssm status opencode-telegram-bot
 ```
 
-## Main commands
+## Main Commands
 
 - `/status`
 - `/new`
@@ -219,32 +216,30 @@ nssm status opencode-telegram-bot
 - `/agent`
 - `/rename`
 - `/screenshot`
+- `/sendfile`
 - `/help`
 
-## Important config
+## Troubleshooting
 
-See `.env.example` for full details. Commonly used variables:
+### Bot says OpenCode server is unavailable
 
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_ALLOWED_USER_ID`
-- `OPENCODE_API_URL`
-- `OPENCODE_MODEL_PROVIDER`
-- `OPENCODE_MODEL_ID`
-- `BOT_LOCALE`
-- `SESSIONS_LIST_LIMIT`
-- `PROJECTS_LIST_LIMIT`
-- `SERVICE_MESSAGES_INTERVAL_SEC`
-- `HIDE_THINKING_MESSAGES`
-- `HIDE_TOOL_CALL_MESSAGES`
-- `HIDE_TOOL_FILE_MESSAGES`
-- `CODE_FILE_MAX_SIZE_KB`
+Check in order:
 
-For voice/audio transcription:
+1. Is OpenCode running?
+   - Run `opencode serve`
+2. Does `OPENCODE_API_URL` match the actual host/port?
+3. If auth is enabled, are `OPENCODE_SERVER_USERNAME/PASSWORD` correct?
+4. If running across machines, is the API reachable through firewall/network?
 
-- `STT_API_URL`
-- `STT_API_KEY`
-- `STT_MODEL`
-- `STT_LANGUAGE`
+### Sessions not showing as expected
+
+- `/sessions` is project-scoped (current selected project)
+- Increase `SESSIONS_LIST_LIMIT` if needed
+
+### Telegram callbacks look stale
+
+- Re-open the relevant menu (`/sessions`, `/delete_sessions`, `/projects`)
+- Old inline messages can become inactive after state transitions
 
 ## Development
 
@@ -253,3 +248,7 @@ npm run build
 npm run lint
 npm test
 ```
+
+## License
+
+MIT. See `LICENSE`.
