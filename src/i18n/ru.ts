@@ -5,6 +5,7 @@ export const ru: I18nDictionary = {
   "cmd.description.new": "Создать новую сессию",
   "cmd.description.stop": "Прервать текущее действие",
   "cmd.description.sessions": "Список сессий",
+  "cmd.description.delete_sessions": "Удалить сессии",
   "cmd.description.projects": "Список проектов",
   "cmd.description.model": "Выбрать модель",
   "cmd.description.agent": "Выбрать режим работы",
@@ -112,6 +113,23 @@ export const ru: I18nDictionary = {
   "sessions.preview.title": "Последние сообщения:",
   "sessions.preview.you": "Вы:",
   "sessions.preview.agent": "Агент:",
+
+  "delete_sessions.project_not_selected":
+    "🏗 Проект не выбран.\n\nСначала выберите проект командой /projects.",
+  "delete_sessions.empty": "📭 Нет сессий для удаления.",
+  "delete_sessions.select": "Выберите сессию для удаления:",
+  "delete_sessions.select_sub": "Выберите сессию для удаления (основную или дочернюю):",
+  "delete_sessions.select_project_first": "🔴 Проект не выбран. Используйте /projects.",
+  "delete_sessions.confirm_single":
+    "⚠️ Удалить сессию \"{title}\"?\n\nЭто действие нельзя отменить.",
+  "delete_sessions.confirm_cascade":
+    "⚠️ Удалить основную сессию \"{title}\" и {count} дочерних сессий?\n\nЭто действие нельзя отменить.",
+  "delete_sessions.button.confirm": "✅ Подтвердить удаление",
+  "delete_sessions.button.cancel": "❌ Отмена",
+  "delete_sessions.deleted": "✅ Удалено сессий: {count}.",
+  "delete_sessions.fetch_error":
+    "🔴 OpenCode Server недоступен или произошла ошибка при получении списка сессий.",
+  "delete_sessions.delete_error": "🔴 Не удалось удалить сессию.",
 
   "new.project_not_selected": "🏗 Проект не выбран.\n\nСначала выберите проект командой /projects.",
   "new.created": "✅ Создана новая сессия: {title}",

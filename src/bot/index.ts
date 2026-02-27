@@ -14,6 +14,7 @@ import { helpCommand } from "./commands/help.js";
 import { statusCommand } from "./commands/status.js";
 import { MODEL_BUTTON_TEXT_PATTERN, VARIANT_BUTTON_TEXT_PATTERN } from "./message-patterns.js";
 import { sessionsCommand, handleSessionSelect } from "./commands/sessions.js";
+import { deleteSessionsCommand, handleDeleteSessionSelect } from "./commands/delete-sessions.js";
 import { newCommand } from "./commands/new.js";
 import { projectsCommand, handleProjectSelect } from "./commands/projects.js";
 import { stopCommand } from "./commands/stop.js";
@@ -1299,6 +1300,7 @@ export function createBot(): Bot<Context> {
   bot.command("opencode_stop", opencodeStopCommand);
   bot.command("projects", projectsCommand);
   bot.command("sessions", sessionsCommand);
+  bot.command("delete_sessions", deleteSessionsCommand);
   bot.command("new", newCommand);
   bot.command("agent", handleAgentCommand);
   bot.command("model", handleModelCommand);
@@ -1321,6 +1323,7 @@ export function createBot(): Bot<Context> {
 
       const handledInlineCancel = await handleInlineMenuCancel(ctx);
       const handledSession = await handleSessionSelect(ctx);
+      const handledDeleteSession = await handleDeleteSessionSelect(ctx);
       const handledProject = await handleProjectSelect(ctx);
       const handledQuestion = await handleQuestionCallback(ctx);
       const handledPermission = await handlePermissionCallback(ctx);
@@ -1331,13 +1334,14 @@ export function createBot(): Bot<Context> {
       const handledRenameCancel = await handleRenameCancel(ctx);
 
       logger.debug(
-        `[Bot] Callback handled: sendFileSelection=${handledSendFileSelection}, inlineCancel=${handledInlineCancel}, session=${handledSession}, project=${handledProject}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, rename=${handledRenameCancel}`,
+        `[Bot] Callback handled: sendFileSelection=${handledSendFileSelection}, inlineCancel=${handledInlineCancel}, session=${handledSession}, deleteSession=${handledDeleteSession}, project=${handledProject}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, rename=${handledRenameCancel}`,
       );
 
       if (
         !handledSendFileSelection &&
         !handledInlineCancel &&
         !handledSession &&
+        !handledDeleteSession &&
         !handledProject &&
         !handledQuestion &&
         !handledPermission &&

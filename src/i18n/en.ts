@@ -3,6 +3,7 @@ export const en = {
   "cmd.description.new": "Create a new session",
   "cmd.description.stop": "Stop current action",
   "cmd.description.sessions": "List sessions",
+  "cmd.description.delete_sessions": "Delete sessions",
   "cmd.description.projects": "List projects",
   "cmd.description.model": "Select model",
   "cmd.description.agent": "Select mode",
@@ -113,6 +114,23 @@ export const en = {
   "sessions.preview.title": "Recent messages:",
   "sessions.preview.you": "You:",
   "sessions.preview.agent": "Agent:",
+
+  "delete_sessions.project_not_selected":
+    "🏗 Project is not selected.\n\nFirst select a project with /projects.",
+  "delete_sessions.empty": "📭 No sessions found to delete.",
+  "delete_sessions.select": "Select a session to delete:",
+  "delete_sessions.select_sub": "Select a session to delete (main or sub-session):",
+  "delete_sessions.select_project_first": "🔴 Project is not selected. Use /projects.",
+  "delete_sessions.confirm_single":
+    "⚠️ Delete session \"{title}\"?\n\nThis action cannot be undone.",
+  "delete_sessions.confirm_cascade":
+    "⚠️ Delete main session \"{title}\" and {count} sub-session(s)?\n\nThis action cannot be undone.",
+  "delete_sessions.button.confirm": "✅ Confirm delete",
+  "delete_sessions.button.cancel": "❌ Cancel",
+  "delete_sessions.deleted": "✅ Deleted {count} session(s).",
+  "delete_sessions.fetch_error":
+    "🔴 OpenCode Server is unavailable or an error occurred while loading sessions.",
+  "delete_sessions.delete_error": "🔴 Failed to delete session.",
 
   "new.project_not_selected":
     "🏗 Project is not selected.\n\nFirst select a project with /projects.",
