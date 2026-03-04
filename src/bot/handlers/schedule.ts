@@ -148,6 +148,22 @@ function clearScheduleInteraction(): void {
   interactionManager.clear("schedule_finished");
 }
 
+async function removeScheduleMenuMessage(
+  ctx: Context,
+  metadata: ScheduleInteractionMetadata,
+): Promise<void> {
+  if (typeof metadata.messageId !== "number") {
+    return;
+  }
+
+  const chatId = ctx.chat?.id ?? metadata.interactionChatId;
+  if (chatId === null) {
+    return;
+  }
+
+  await ctx.api.deleteMessage(chatId, metadata.messageId).catch(() => {});
+}
+
 function ensureSessionForCreate(ctx: Context): { id: string; title: string; directory: string } | null {
   const scope = getScope(ctx);
   const scopedSession = getCurrentSessionByThread(scope.threadId, scope.chatId);
@@ -769,6 +785,7 @@ export async function handleScheduleTextInput(ctx: Context): Promise<boolean> {
         rule,
       });
 
+      await removeScheduleMenuMessage(ctx, metadata);
       clearScheduleInteraction();
       await ctx.reply(
         t("schedule.created", {
