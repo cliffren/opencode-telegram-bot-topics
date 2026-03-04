@@ -561,14 +561,22 @@ const sessionStatusCompletedAt = new Map<string, number>();
 const sessionStatusRateLimitedUntil = new Map<string, number>();
 const sessionStatusRateLimitNoticeUntil = new Map<string, number>();
 
+function clearSessionStatusTracking(sessionId: string): void {
+  stopThinkingAnimation(sessionId);
+  sessionStatusSlots.delete(sessionId);
+  sessionStatusCompletedAt.delete(sessionId);
+  sessionStatusRateLimitedUntil.delete(sessionId);
+  sessionStatusRateLimitNoticeUntil.delete(sessionId);
+}
+
 function clearSessionCompletionGuardByContext(ctx: Context): void {
   const threadId = getThreadId(ctx);
-  const session = getCurrentSessionByThread(threadId, ctx.chat?.id ?? null);
+  const session = getCurrentSessionByThread(threadId, ctx.chat?.id ?? null) ?? getCurrentSession();
   if (!session) {
     return;
   }
 
-  sessionStatusCompletedAt.delete(session.id);
+  clearSessionStatusTracking(session.id);
 }
 
 function shouldSuppressPostCompleteStatus(sessionId: string): boolean {
@@ -964,6 +972,10 @@ async function ensureEventSubscription(directory: string): Promise<void> {
               message_thread_id: messageThreadId,
             });
           }
+        }
+
+        if (statusSlot) {
+          sessionStatusSlots.delete(sessionId);
         }
       });
     } catch (err) {
