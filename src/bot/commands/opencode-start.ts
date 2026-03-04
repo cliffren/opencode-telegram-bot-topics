@@ -1,6 +1,7 @@
 import { CommandContext, Context } from "grammy";
 import { opencodeClient } from "../../opencode/client.js";
 import { processManager } from "../../process/manager.js";
+import { getConfiguredOpenCodeTarget } from "../../process/target.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 
@@ -36,8 +37,10 @@ async function waitForServerReady(maxWaitMs: number = 10000): Promise<boolean> {
  */
 export async function opencodeStartCommand(ctx: CommandContext<Context>) {
   try {
+    const target = getConfiguredOpenCodeTarget();
+
     // 1. Check if process is already running under our management
-    if (processManager.isRunning()) {
+    if (processManager.isRunningForPort(target.port)) {
       const uptime = processManager.getUptime();
       const uptimeStr = uptime ? Math.floor(uptime / 1000) : 0;
 
@@ -45,6 +48,7 @@ export async function opencodeStartCommand(ctx: CommandContext<Context>) {
         t("opencode_start.already_running_managed", {
           pid: processManager.getPID() ?? "-",
           seconds: uptimeStr,
+          port: String(target.port),
         }),
       );
       return;
@@ -58,6 +62,7 @@ export async function opencodeStartCommand(ctx: CommandContext<Context>) {
         await ctx.reply(
           t("opencode_start.already_running_external", {
             version: data.version || t("common.unknown"),
+            port: String(target.port),
           }),
         );
         return;
@@ -70,7 +75,7 @@ export async function opencodeStartCommand(ctx: CommandContext<Context>) {
     const statusMessage = await ctx.reply(t("opencode_start.starting"));
 
     // 4. Start the process
-    const { success, error } = await processManager.start();
+    const { success, error } = await processManager.start(target);
 
     if (!success) {
       await ctx.api.editMessageText(
@@ -92,6 +97,7 @@ export async function opencodeStartCommand(ctx: CommandContext<Context>) {
         statusMessage.message_id,
         t("opencode_start.started_not_ready", {
           pid: processManager.getPID() ?? "-",
+          port: String(target.port),
         }),
       );
       return;
@@ -105,6 +111,7 @@ export async function opencodeStartCommand(ctx: CommandContext<Context>) {
       t("opencode_start.success", {
         pid: processManager.getPID() ?? "-",
         version: health?.version || t("common.unknown"),
+        port: String(target.port),
       }),
     );
 

@@ -8,6 +8,7 @@ export const en = {
   "cmd.description.model": "Select model",
   "cmd.description.agent": "Select mode",
   "cmd.description.opencode_start": "Start OpenCode server",
+  "cmd.description.opencode_restart": "Restart OpenCode server",
   "cmd.description.opencode_stop": "Stop OpenCode server",
   "cmd.description.help": "Help",
 
@@ -154,26 +155,37 @@ export const en = {
   "stop.error": "🔴 Failed to stop action.\n\nEvent stream is stopped, try /stop again.",
 
   "opencode_start.already_running_managed":
-    "⚠️ OpenCode Server is already running\n\nPID: {pid}\nUptime: {seconds} seconds",
+    "⚠️ OpenCode Server is already running\n\nPort: {port}\nPID: {pid}\nUptime: {seconds} seconds",
   "opencode_start.already_running_external":
-    "✅ OpenCode Server is already running as an external process\n\nVersion: {version}\n\nThis server was not started by bot, so /opencode-stop cannot stop it.",
+    "✅ OpenCode Server is already running as an external process\n\nPort: {port}\nVersion: {version}\n\nThis server was not started by bot, so /opencode-stop cannot stop it.",
   "opencode_start.starting": "🔄 Starting OpenCode Server...",
   "opencode_start.start_error":
     "🔴 Failed to start OpenCode Server\n\nError: {error}\n\nCheck that OpenCode CLI is installed and available in PATH:\n`opencode --version`\n`npm install -g @opencode-ai/cli`",
   "opencode_start.started_not_ready":
-    "⚠️ OpenCode Server started, but is not responding\n\nPID: {pid}\n\nServer may still be starting. Try /status in a few seconds.",
+    "⚠️ OpenCode Server started, but is not responding\n\nPort: {port}\nPID: {pid}\n\nServer may still be starting. Try /status in a few seconds.",
   "opencode_start.success":
-    "✅ OpenCode Server started successfully\n\nPID: {pid}\nVersion: {version}",
+    "✅ OpenCode Server started successfully\n\nPort: {port}\nPID: {pid}\nVersion: {version}",
   "opencode_start.error":
     "🔴 An error occurred while starting server.\n\nCheck application logs for details.",
   "opencode_stop.external_running":
-    "⚠️ OpenCode Server is running as an external process\n\nThis server was not started via /opencode-start.\nStop it manually or use /status to check state.",
-  "opencode_stop.not_running": "⚠️ OpenCode Server is not running",
-  "opencode_stop.stopping": "🛑 Stopping OpenCode Server...\n\nPID: {pid}",
+    "⚠️ OpenCode Server is running as an external process\n\nPort: {port}\nThis server was not started via /opencode-start.\nStop it manually or use /status to check state.",
+  "opencode_stop.not_running": "⚠️ OpenCode Server is not running on port {port}",
+  "opencode_stop.stopping": "🛑 Stopping OpenCode Server...\n\nPort: {port}\nPID: {pid}",
   "opencode_stop.stop_error": "🔴 Failed to stop OpenCode Server\n\nError: {error}",
-  "opencode_stop.success": "✅ OpenCode Server stopped successfully",
+  "opencode_stop.success": "✅ OpenCode Server stopped successfully on port {port}",
   "opencode_stop.error":
     "🔴 An error occurred while stopping server.\n\nCheck application logs for details.",
+
+  "opencode_restart.restarting": "🔄 Restarting OpenCode Server...\n\nPort: {port}",
+  "opencode_restart.external_running":
+    "⚠️ OpenCode Server is running as an external process on port {port}.\n\nFor safety, bot will not restart external processes.",
+  "opencode_restart.stop_error": "🔴 Failed to stop OpenCode Server before restart\n\nError: {error}",
+  "opencode_restart.start_error": "🔴 Failed to start OpenCode Server during restart\n\nError: {error}",
+  "opencode_restart.started_not_ready":
+    "⚠️ OpenCode Server restarted, but is not responding\n\nPort: {port}\nPID: {pid}",
+  "opencode_restart.success":
+    "✅ OpenCode Server restarted successfully\n\nPort: {port}\nPID: {pid}\nVersion: {version}",
+  "opencode_restart.error": "🔴 An error occurred while restarting server.",
 
   "agent.changed_callback": "Mode changed: {name}",
   "agent.changed_message": "✅ Mode changed to: {name}",

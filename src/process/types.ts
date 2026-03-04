@@ -8,6 +8,13 @@ export interface ProcessState {
   pid: number | null;
   startTime: Date | null;
   isRunning: boolean;
+  apiUrl: string | null;
+  port: number | null;
+}
+
+export interface ProcessTarget {
+  apiUrl: string;
+  port: number;
 }
 
 /**
@@ -32,7 +39,7 @@ export interface ProcessManagerInterface {
    * Start the OpenCode server process
    * Saves PID to settings.json for recovery after bot restart
    */
-  start(): Promise<ProcessOperationResult>;
+  start(target: ProcessTarget): Promise<ProcessOperationResult>;
 
   /**
    * Stop the OpenCode server process
@@ -56,4 +63,14 @@ export interface ProcessManagerInterface {
    * Get the uptime of the server in milliseconds
    */
   getUptime(): number | null;
+
+  /**
+   * Check whether running managed process matches target port
+   */
+  isRunningForPort(port: number): boolean;
+
+  /**
+   * Returns managed process target port if known
+   */
+  getManagedPort(): number | null;
 }

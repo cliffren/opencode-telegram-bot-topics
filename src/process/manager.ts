@@ -2,7 +2,12 @@ import { spawn, exec, type ChildProcess } from "child_process";
 import { promisify } from "util";
 import { getServerProcess, setServerProcess, clearServerProcess } from "../settings/manager.js";
 import { logger } from "../utils/logger.js";
-import type { ProcessState, ProcessOperationResult, ProcessManagerInterface } from "./types.js";
+import type {
+  ProcessState,
+  ProcessOperationResult,
+  ProcessManagerInterface,
+  ProcessTarget,
+} from "./types.js";
 
 const execAsync = promisify(exec);
 
@@ -17,6 +22,8 @@ class ProcessManager implements ProcessManagerInterface {
     pid: null,
     startTime: null,
     isRunning: false,
+    apiUrl: null,
+    port: null,
   };
 
   /**
@@ -44,6 +51,8 @@ class ProcessManager implements ProcessManagerInterface {
         pid: savedProcess.pid,
         startTime: new Date(savedProcess.startTime),
         isRunning: true,
+        apiUrl: savedProcess.apiUrl ?? null,
+        port: savedProcess.port ?? null,
       };
     } else {
       logger.warn(`[ProcessManager] Process PID=${savedProcess.pid} is dead, cleaning up`);
@@ -54,7 +63,7 @@ class ProcessManager implements ProcessManagerInterface {
   /**
    * Start the OpenCode server process
    */
-  async start(): Promise<ProcessOperationResult> {
+  async start(target: ProcessTarget): Promise<ProcessOperationResult> {
     if (this.state.isRunning) {
       return {
         success: false,
@@ -67,7 +76,9 @@ class ProcessManager implements ProcessManagerInterface {
 
       const isWindows = process.platform === "win32";
       const command = isWindows ? "cmd.exe" : "opencode";
-      const args = isWindows ? ["/c", "opencode", "serve"] : ["serve"];
+      const args = isWindows
+        ? ["/c", "opencode", "serve", "--port", String(target.port)]
+        : ["serve", "--port", String(target.port)];
 
       // Spawn the process
       // Windows: use cmd.exe to resolve npm-installed global commands
@@ -115,12 +126,16 @@ class ProcessManager implements ProcessManagerInterface {
         pid: childProcess.pid,
         startTime,
         isRunning: true,
+        apiUrl: target.apiUrl,
+        port: target.port,
       };
 
       // Persist to settings.json
       setServerProcess({
         pid: childProcess.pid,
         startTime: startTime.toISOString(),
+        apiUrl: target.apiUrl,
+        port: target.port,
       });
 
       logger.info(`[ProcessManager] OpenCode server started with PID=${childProcess.pid}`);
@@ -259,6 +274,18 @@ class ProcessManager implements ProcessManagerInterface {
     return Date.now() - this.state.startTime.getTime();
   }
 
+  isRunningForPort(port: number): boolean {
+    if (!this.isRunning()) {
+      return false;
+    }
+
+    return this.state.port === port;
+  }
+
+  getManagedPort(): number | null {
+    return this.state.port;
+  }
+
   /**
    * Check if a process with given PID is alive
    * Uses process.kill(pid, 0) which checks existence without killing
@@ -303,6 +330,8 @@ class ProcessManager implements ProcessManagerInterface {
       pid: null,
       startTime: null,
       isRunning: false,
+      apiUrl: null,
+      port: null,
     };
     clearServerProcess();
   }

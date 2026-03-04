@@ -1,6 +1,7 @@
 import { CommandContext, Context } from "grammy";
 import { opencodeClient } from "../../opencode/client.js";
 import { processManager } from "../../process/manager.js";
+import { getConfiguredOpenCodeTarget } from "../../process/target.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 
@@ -10,27 +11,31 @@ import { t } from "../../i18n/index.js";
  */
 export async function opencodeStopCommand(ctx: CommandContext<Context>) {
   try {
+    const target = getConfiguredOpenCodeTarget();
+
     // 1. Check if process is running under our management
-    if (!processManager.isRunning()) {
+    if (!processManager.isRunningForPort(target.port)) {
       // Check if there's an external server running
       try {
         const { data, error } = await opencodeClient.global.health();
 
         if (!error && data?.healthy) {
-          await ctx.reply(t("opencode_stop.external_running"));
+          await ctx.reply(t("opencode_stop.external_running", { port: String(target.port) }));
           return;
         }
       } catch {
         // Server not accessible
       }
 
-      await ctx.reply(t("opencode_stop.not_running"));
+      await ctx.reply(t("opencode_stop.not_running", { port: String(target.port) }));
       return;
     }
 
     // 2. Notify user that we're stopping the server
     const pid = processManager.getPID();
-    const statusMessage = await ctx.reply(t("opencode_stop.stopping", { pid: pid ?? "-" }));
+    const statusMessage = await ctx.reply(
+      t("opencode_stop.stopping", { pid: pid ?? "-", port: String(target.port) }),
+    );
 
     // 3. Stop the process
     const { success, error } = await processManager.stop(5000);
@@ -48,7 +53,7 @@ export async function opencodeStopCommand(ctx: CommandContext<Context>) {
     await ctx.api.editMessageText(
       ctx.chat.id,
       statusMessage.message_id,
-      t("opencode_stop.success"),
+      t("opencode_stop.success", { port: String(target.port) }),
     );
 
     logger.info("[Bot] OpenCode server stopped successfully");

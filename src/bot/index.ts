@@ -19,6 +19,7 @@ import { newCommand } from "./commands/new.js";
 import { projectsCommand, handleProjectSelect } from "./commands/projects.js";
 import { stopCommand } from "./commands/stop.js";
 import { opencodeStartCommand } from "./commands/opencode-start.js";
+import { opencodeRestartCommand } from "./commands/opencode-restart.js";
 import { opencodeStopCommand } from "./commands/opencode-stop.js";
 import { handleAgentCommand } from "./commands/agent.js";
 import { handleModelCommand } from "./commands/model.js";
@@ -1375,6 +1376,7 @@ export function createBot(): Bot<Context> {
   bot.command("help", helpCommand);
   bot.command("status", statusCommand);
   bot.command("opencode_start", opencodeStartCommand);
+  bot.command("opencode_restart", opencodeRestartCommand);
   bot.command("opencode_stop", opencodeStopCommand);
   bot.command("projects", projectsCommand);
   bot.command("sessions", sessionsCommand);

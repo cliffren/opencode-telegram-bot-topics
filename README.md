@@ -254,7 +254,23 @@ nssm status opencode-telegram-bot
 - `/screenshot`
 - `/sendfile`
 - `/schedule`
+- `/opencode_start`
+- `/opencode_restart`
+- `/opencode_stop`
 - `/help`
+
+### OpenCode server control commands
+
+These commands are port-aligned to the bot's configured `OPENCODE_API_URL`.
+
+- `/opencode_start` starts `opencode serve --port <target-port>` if target port is not healthy.
+- `/opencode_stop` stops only the managed process for that target port.
+- `/opencode_restart` restarts only the managed process for that target port.
+
+Notes:
+
+- Target port is parsed from `OPENCODE_API_URL` (for example `http://127.0.0.1:4107`).
+- External OpenCode processes are detected but not force-stopped by the bot.
 
 ## Schedule Tasks (`/schedule`)
 

@@ -10,6 +10,7 @@ export const ru: I18nDictionary = {
   "cmd.description.model": "Выбрать модель",
   "cmd.description.agent": "Выбрать режим работы",
   "cmd.description.opencode_start": "Запустить OpenCode сервер",
+  "cmd.description.opencode_restart": "Перезапустить OpenCode сервер",
   "cmd.description.opencode_stop": "Остановить OpenCode сервер",
   "cmd.description.help": "Справка",
 
@@ -155,25 +156,38 @@ export const ru: I18nDictionary = {
     "🔴 Ошибка при прерывании действия.\n\nПоток событий остановлен, попробуйте /stop еще раз.",
 
   "opencode_start.already_running_managed":
-    "⚠️ OpenCode Server уже запущен\n\nPID: {pid}\nUptime: {seconds} секунд",
+    "⚠️ OpenCode Server уже запущен\n\nПорт: {port}\nPID: {pid}\nUptime: {seconds} секунд",
   "opencode_start.already_running_external":
-    "✅ OpenCode Server уже запущен внешним процессом\n\nВерсия: {version}\n\nЭтот сервер не был запущен через бота, поэтому команда /opencode-stop не сможет его остановить.",
+    "✅ OpenCode Server уже запущен внешним процессом\n\nПорт: {port}\nВерсия: {version}\n\nЭтот сервер не был запущен через бота, поэтому команда /opencode-stop не сможет его остановить.",
   "opencode_start.starting": "🔄 Запускаю OpenCode Server...",
   "opencode_start.start_error":
     "🔴 Не удалось запустить OpenCode Server\n\nОшибка: {error}\n\nПроверьте, что OpenCode CLI установлен и доступен в PATH:\n`opencode --version`\n`npm install -g @opencode-ai/cli`",
   "opencode_start.started_not_ready":
-    "⚠️ OpenCode Server запущен, но не отвечает\n\nPID: {pid}\n\nСервер может запускаться. Попробуйте /status через несколько секунд.",
-  "opencode_start.success": "✅ OpenCode Server успешно запущен\n\nPID: {pid}\nВерсия: {version}",
+    "⚠️ OpenCode Server запущен, но не отвечает\n\nПорт: {port}\nPID: {pid}\n\nСервер может запускаться. Попробуйте /status через несколько секунд.",
+  "opencode_start.success": "✅ OpenCode Server успешно запущен\n\nПорт: {port}\nPID: {pid}\nВерсия: {version}",
   "opencode_start.error":
     "🔴 Произошла ошибка при запуске сервера.\n\nПроверьте логи приложения для подробностей.",
   "opencode_stop.external_running":
-    "⚠️ OpenCode Server запущен внешним процессом\n\nЭтот сервер не был запущен через /opencode-start.\nОстановите его вручную или используйте /status для проверки состояния.",
-  "opencode_stop.not_running": "⚠️ OpenCode Server не запущен",
-  "opencode_stop.stopping": "🛑 Останавливаю OpenCode Server...\n\nPID: {pid}",
+    "⚠️ OpenCode Server запущен внешним процессом\n\nПорт: {port}\nЭтот сервер не был запущен через /opencode-start.\nОстановите его вручную или используйте /status для проверки состояния.",
+  "opencode_stop.not_running": "⚠️ OpenCode Server не запущен на порту {port}",
+  "opencode_stop.stopping": "🛑 Останавливаю OpenCode Server...\n\nПорт: {port}\nPID: {pid}",
   "opencode_stop.stop_error": "🔴 Не удалось остановить OpenCode Server\n\nОшибка: {error}",
-  "opencode_stop.success": "✅ OpenCode Server успешно остановлен",
+  "opencode_stop.success": "✅ OpenCode Server успешно остановлен на порту {port}",
   "opencode_stop.error":
     "🔴 Произошла ошибка при остановке сервера.\n\nПроверьте логи приложения для подробностей.",
+
+  "opencode_restart.restarting": "🔄 Перезапускаю OpenCode Server...\n\nПорт: {port}",
+  "opencode_restart.external_running":
+    "⚠️ OpenCode Server запущен внешним процессом на порту {port}.\n\nДля безопасности бот не перезапускает внешние процессы.",
+  "opencode_restart.stop_error":
+    "🔴 Не удалось остановить OpenCode Server перед перезапуском\n\nОшибка: {error}",
+  "opencode_restart.start_error":
+    "🔴 Не удалось запустить OpenCode Server во время перезапуска\n\nОшибка: {error}",
+  "opencode_restart.started_not_ready":
+    "⚠️ OpenCode Server перезапущен, но не отвечает\n\nПорт: {port}\nPID: {pid}",
+  "opencode_restart.success":
+    "✅ OpenCode Server успешно перезапущен\n\nПорт: {port}\nPID: {pid}\nВерсия: {version}",
+  "opencode_restart.error": "🔴 Произошла ошибка при перезапуске сервера.",
 
   "agent.changed_callback": "Режим изменен: {name}",
   "agent.changed_message": "✅ Режим изменен на: {name}",

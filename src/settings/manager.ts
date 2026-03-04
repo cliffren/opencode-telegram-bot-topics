@@ -19,6 +19,8 @@ export interface SessionInfo {
 export interface ServerProcessInfo {
   pid: number;
   startTime: string; // ISO string
+  apiUrl?: string;
+  port?: number;
 }
 
 export interface SessionDirectoryCacheInfo {

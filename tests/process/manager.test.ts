@@ -26,6 +26,11 @@ vi.mock("../../src/settings/manager.js", () => ({
 
 import { processManager } from "../../src/process/manager.js";
 
+const defaultTarget = {
+  apiUrl: "http://127.0.0.1:4096",
+  port: 4096,
+};
+
 function createMockChildProcess(pid: number): ChildProcess {
   const processMock = new EventEmitter() as unknown as ChildProcess;
 
@@ -102,12 +107,12 @@ describe("process/manager", () => {
     spawnMock.mockReturnValue(createMockChildProcess(456));
 
     try {
-      const result = await processManager.start();
+      const result = await processManager.start(defaultTarget);
 
       expect(result).toEqual({ success: true });
       expect(spawnMock).toHaveBeenCalledWith(
         "cmd.exe",
-        ["/c", "opencode", "serve"],
+        ["/c", "opencode", "serve", "--port", "4096"],
         expect.objectContaining({
           detached: false,
           windowsHide: true,
@@ -118,12 +123,14 @@ describe("process/manager", () => {
         expect.objectContaining({
           pid: 456,
           startTime: expect.any(String),
+          apiUrl: defaultTarget.apiUrl,
+          port: defaultTarget.port,
         }),
       );
       expect(processManager.getPID()).toBe(456);
       expect(processManager.isRunning()).toBe(true);
 
-      const alreadyRunning = await processManager.start();
+      const alreadyRunning = await processManager.start(defaultTarget);
       expect(alreadyRunning).toEqual({ success: false, error: "Process already running" });
     } finally {
       restorePlatform();
@@ -135,7 +142,7 @@ describe("process/manager", () => {
     spawnMock.mockReturnValue(createMockChildProcess(undefined as never));
 
     try {
-      const result = await processManager.start();
+      const result = await processManager.start(defaultTarget);
       expect(result.success).toBe(false);
       expect(result.error).toContain("Failed to start OpenCode server process");
       expect(processManager.getPID()).toBeNull();
@@ -151,7 +158,7 @@ describe("process/manager", () => {
     vi.spyOn(process, "kill").mockImplementation(() => true);
 
     try {
-      await processManager.start();
+      await processManager.start(defaultTarget);
       const result = await processManager.stop(100);
 
       expect(result).toEqual({ success: true });
@@ -175,7 +182,7 @@ describe("process/manager", () => {
     spawnMock.mockReturnValue(createMockChildProcess(999));
 
     try {
-      await processManager.start();
+      await processManager.start(defaultTarget);
       vi.spyOn(process, "kill").mockImplementation(() => {
         throw new Error("ESRCH");
       });
