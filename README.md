@@ -18,6 +18,7 @@ This project is based on [grinev/opencode-telegram-bot](https://github.com/grine
 - In-place status stream (thinking/tool/final in one message)
 - Better Telegram file/document handling for prompt input
 - Voice/audio transcription support (Whisper-compatible API)
+- `/schedule` menu for delayed and recurring tasks (fixed time, after delay, daily/weekly/monthly/yearly)
 
 ## Requirements
 
@@ -252,7 +253,28 @@ nssm status opencode-telegram-bot
 - `/rename`
 - `/screenshot`
 - `/sendfile`
+- `/schedule`
 - `/help`
+
+## Schedule Tasks (`/schedule`)
+
+Use `/schedule` to open an interactive menu (no long command syntax needed).
+
+Supported schedule types:
+
+- Fixed time: `YYYY-MM-DD HH:mm`
+- After delay: `<number>m` or `<number>h` (minutes/hours)
+- Recurring:
+  - Daily: `HH:mm`
+  - Weekly: choose weekday in menu, then `HH:mm`
+  - Monthly: `DD HH:mm`
+  - Yearly: `MM-DD HH:mm`
+
+Notes:
+
+- Tasks are bound to the current chat/topic and current selected session.
+- Timezone is the machine timezone where the bot process runs.
+- Task list supports pagination in the inline menu.
 
 ## Terminal Sendfile CLI (for model-driven delivery)
 

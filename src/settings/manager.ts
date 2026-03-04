@@ -2,6 +2,7 @@ import type { ModelInfo } from "../model/types.js";
 import path from "node:path";
 import { getRuntimePaths } from "../runtime/paths.js";
 import { logger } from "../utils/logger.js";
+import type { ScheduledTask } from "../schedule/types.js";
 
 export interface ProjectInfo {
   id: string;
@@ -40,6 +41,7 @@ export interface Settings {
   pinnedMessageId?: number;
   serverProcess?: ServerProcessInfo;
   sessionDirectoryCache?: SessionDirectoryCacheInfo;
+  scheduledTasks?: ScheduledTask[];
 }
 
 function getSettingsFilePath(): string {
@@ -254,6 +256,15 @@ export function setSessionDirectoryCache(cache: SessionDirectoryCacheInfo): Prom
 export function clearSessionDirectoryCache(): void {
   currentSettings.sessionDirectoryCache = undefined;
   void writeSettingsFile(currentSettings);
+}
+
+export function getScheduledTasks(): ScheduledTask[] {
+  return [...(currentSettings.scheduledTasks ?? [])];
+}
+
+export function setScheduledTasks(tasks: ScheduledTask[]): Promise<void> {
+  currentSettings.scheduledTasks = [...tasks];
+  return writeSettingsFile(currentSettings);
 }
 
 export function __resetSettingsForTests(): void {

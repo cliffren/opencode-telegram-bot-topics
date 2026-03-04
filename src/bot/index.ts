@@ -46,6 +46,7 @@ import { interactionManager } from "../interaction/manager.js";
 import { clearAllInteractionState } from "../interaction/cleanup.js";
 import { keyboardManager } from "../keyboard/manager.js";
 import { subscribeToEvents } from "../opencode/events.js";
+import { opencodeClient } from "../opencode/client.js";
 import { summaryAggregator } from "../summary/aggregator.js";
 import { formatSummary, formatToolInfo } from "../summary/formatter.js";
 import { ToolMessageBatcher } from "../summary/tool-message-batcher.js";
@@ -59,6 +60,12 @@ import { processUserPrompt } from "./handlers/prompt.js";
 import { getCurrentSessionByThread } from "./handlers/prompt.js";
 import { handleVoiceMessage } from "./handlers/voice.js";
 import { handleImageMessage } from "./handlers/image.js";
+import {
+  handleScheduleCallback,
+  handleScheduleTextInput,
+} from "./handlers/schedule.js";
+import { scheduleCommand } from "./commands/schedule.js";
+import { configureScheduleRunner, ensureScheduleRunnerStarted } from "../schedule/runner.js";
 
 let botInstance: Bot<Context> | null = null;
 let chatIdInstance: number | null = null;
@@ -1263,6 +1270,37 @@ export function createBot(): Bot<Context> {
   }
 
   const bot = new Bot(config.telegram.token, botOptions);
+  botInstance = bot;
+
+  configureScheduleRunner({
+    executeTaskPrompt: async (task) => {
+      bindSessionRouteContext(task.scope.sessionId, {
+        chatId: task.scope.chatId,
+        threadId: task.scope.threadId,
+        directory: task.scope.directory,
+      });
+      chatIdInstance = task.scope.chatId;
+      threadIdInstance = task.scope.threadId;
+
+      logger.info(
+        `[ScheduleRunner] Routing scheduled task: id=${task.id}, chatId=${task.scope.chatId}, threadId=${task.scope.threadId}, session=${task.scope.sessionId}`,
+      );
+
+      await ensureEventSubscription(task.scope.directory);
+
+      const { error } = await opencodeClient.session.prompt({
+        sessionID: task.scope.sessionId,
+        directory: task.scope.directory,
+        parts: [{ type: "text", text: task.prompt }],
+      });
+
+      if (error) {
+        throw error;
+      }
+    },
+  });
+
+  ensureScheduleRunnerStarted();
 
   // Heartbeat for diagnostics: verify the event loop is not blocked
   let heartbeatCounter = 0;
@@ -1336,6 +1374,7 @@ export function createBot(): Bot<Context> {
   bot.command("rename", renameCommand);
   bot.command("screenshot", screenshotCommand);
   bot.command("sendfile", sendfileCommand);
+  bot.command("schedule", scheduleCommand);
 
   bot.on("message:text", unknownCommandMiddleware);
 
@@ -1360,9 +1399,10 @@ export function createBot(): Bot<Context> {
       const handledVariant = await handleVariantSelect(ctx);
       const handledCompactConfirm = await handleCompactConfirm(ctx);
       const handledRenameCancel = await handleRenameCancel(ctx);
+      const handledSchedule = await handleScheduleCallback(ctx);
 
       logger.debug(
-        `[Bot] Callback handled: sendFileSelection=${handledSendFileSelection}, inlineCancel=${handledInlineCancel}, session=${handledSession}, deleteSession=${handledDeleteSession}, project=${handledProject}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, rename=${handledRenameCancel}`,
+        `[Bot] Callback handled: sendFileSelection=${handledSendFileSelection}, inlineCancel=${handledInlineCancel}, session=${handledSession}, deleteSession=${handledDeleteSession}, project=${handledProject}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, rename=${handledRenameCancel}, schedule=${handledSchedule}`,
       );
 
       if (
@@ -1377,7 +1417,8 @@ export function createBot(): Bot<Context> {
         !handledModel &&
         !handledVariant &&
         !handledCompactConfirm &&
-        !handledRenameCancel
+        !handledRenameCancel &&
+        !handledSchedule
       ) {
         logger.debug("Unknown callback query:", ctx.callbackQuery?.data);
         await ctx.answerCallbackQuery({ text: t("callback.unknown_command") });
@@ -1552,6 +1593,11 @@ export function createBot(): Bot<Context> {
 
     const handledRename = await handleRenameTextAnswer(ctx);
     if (handledRename) {
+      return;
+    }
+
+    const handledScheduleText = await handleScheduleTextInput(ctx);
+    if (handledScheduleText) {
       return;
     }
 
