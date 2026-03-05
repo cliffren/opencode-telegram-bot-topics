@@ -127,9 +127,10 @@ export const config = {
       ["SERVICE_MESSAGES_INTERVAL_SEC", "TOOL_MESSAGES_INTERVAL_SEC"],
       5,
     ),
-    hideThinkingMessages: getOptionalBooleanEnvVar("HIDE_THINKING_MESSAGES", false),
+    hideThinkingMessages: getOptionalBooleanEnvVar("HIDE_THINKING_MESSAGES", true),
     hideToolCallMessages: getOptionalBooleanEnvVar("HIDE_TOOL_CALL_MESSAGES", true),
     hideToolFileMessages: getOptionalBooleanEnvVar("HIDE_TOOL_FILE_MESSAGES", true),
+    autoSendFiles: getOptionalBooleanEnvVar("AUTO_SEND_FILES", false),
   },
   files: {
     maxFileSizeKb: parseInt(getEnvVar("CODE_FILE_MAX_SIZE_KB", false) || "20480", 10),
@@ -138,9 +139,13 @@ export const config = {
   },
   external: {
     sendFileRequestsDir: getEnvVar("SEND_FILE_REQUESTS_DIR", false) || undefined,
-    sendFileRequestPollIntervalMs: getOptionalNonNegativeIntEnvVar("SEND_FILE_REQUEST_POLL_INTERVAL_MS", 2000),
+    sendFileRequestPollIntervalMs: getOptionalNonNegativeIntEnvVar(
+      "SEND_FILE_REQUEST_POLL_INTERVAL_MS",
+      2000,
+    ),
     sendFileCliBinDir: getEnvVar("SEND_FILE_CLI_BIN_DIR", false) || undefined,
-    sendFileCliCommand: getEnvVar("SEND_FILE_CLI_COMMAND", false) || "opencode-telegram-topics-sendfile",
+    sendFileCliCommand:
+      getEnvVar("SEND_FILE_CLI_COMMAND", false) || "opencode-telegram-topics-sendfile",
   },
   stt: {
     apiUrl: getEnvVar("STT_API_URL", false),

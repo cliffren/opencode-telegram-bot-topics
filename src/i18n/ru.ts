@@ -50,7 +50,7 @@ export const ru: I18nDictionary = {
   "start.welcome":
     "👋 Добро пожаловать в OpenCode Telegram Bot!\n\nИспользуйте команды:\n/projects — выбрать проект\n/sessions — список сессий\n/new — новая сессия\n/agent — сменить режим\n/model — выбрать модель\n/status — статус\n/help — справка",
   "help.text":
-    "📖 **Справка**\n\n/status - Проверить статус сервера\n/sessions - Список сессий\n/new - Создать новую сессию\n/help - Справка",
+    "📖 **Справка**\n\n/status - Проверить статус сервера\n/sessions - Список сессий\n/new - Создать новую сессию\n/bg - Фоновые задачи\n/help - Справка",
 
   "bot.thinking": "💭 Думаю...",
   "bot.project_not_selected": "🏗 Проект не выбран.\n\nСначала выберите проект командой /projects.",
@@ -121,10 +121,9 @@ export const ru: I18nDictionary = {
   "delete_sessions.select": "Выберите сессию для удаления:",
   "delete_sessions.select_sub": "Выберите сессию для удаления (основную или дочернюю):",
   "delete_sessions.select_project_first": "🔴 Проект не выбран. Используйте /projects.",
-  "delete_sessions.confirm_single":
-    "⚠️ Удалить сессию \"{title}\"?\n\nЭто действие нельзя отменить.",
+  "delete_sessions.confirm_single": '⚠️ Удалить сессию "{title}"?\n\nЭто действие нельзя отменить.',
   "delete_sessions.confirm_cascade":
-    "⚠️ Удалить основную сессию \"{title}\" и {count} дочерних сессий?\n\nЭто действие нельзя отменить.",
+    '⚠️ Удалить основную сессию "{title}" и {count} дочерних сессий?\n\nЭто действие нельзя отменить.',
   "delete_sessions.button.confirm": "✅ Подтвердить удаление",
   "delete_sessions.button.cancel": "❌ Отмена",
   "delete_sessions.deleted": "✅ Удалено сессий: {count}.",
@@ -164,7 +163,8 @@ export const ru: I18nDictionary = {
     "🔴 Не удалось запустить OpenCode Server\n\nОшибка: {error}\n\nПроверьте, что OpenCode CLI установлен и доступен в PATH:\n`opencode --version`\n`npm install -g @opencode-ai/cli`",
   "opencode_start.started_not_ready":
     "⚠️ OpenCode Server запущен, но не отвечает\n\nПорт: {port}\nPID: {pid}\n\nСервер может запускаться. Попробуйте /status через несколько секунд.",
-  "opencode_start.success": "✅ OpenCode Server успешно запущен\n\nПорт: {port}\nPID: {pid}\nВерсия: {version}",
+  "opencode_start.success":
+    "✅ OpenCode Server успешно запущен\n\nПорт: {port}\nPID: {pid}\nВерсия: {version}",
   "opencode_start.error":
     "🔴 Произошла ошибка при запуске сервера.\n\nПроверьте логи приложения для подробностей.",
   "opencode_stop.external_running":
@@ -323,6 +323,7 @@ export const ru: I18nDictionary = {
   "cmd.description.rename": "Переименовать текущую сессию",
   "cmd.description.screenshot": "Сделать скриншот и отправить",
   "cmd.description.sendfile": "Отправить файл в чат",
+  "cmd.description.bg": "Фоновые задачи",
   "cmd.description.schedule": "Отложенные задачи",
 
   "schedule.menu.title": "⏰ Отложенные задачи\nЧасовой пояс: {tz}\n\nВыберите действие:",
@@ -364,6 +365,43 @@ export const ru: I18nDictionary = {
   "schedule.tasks.button.prev": "⬅️ Назад",
   "schedule.tasks.button.next": "Вперед ➡️",
   "schedule.tasks.button.page": "{current}/{total}",
+
+  "bg.menu.title": "🧵 Фоновые задачи",
+  "bg.menu.button.new": "➕ Новая",
+  "bg.menu.button.list": "📋 Список задач",
+  "bg.menu.button.back": "⬅️ Назад",
+  "bg.prompt.ask": "Отправьте текст фоновой задачи:",
+  "bg.post.choose": "Выберите действие после завершения:",
+  "bg.post.none": "Без продолжения",
+  "bg.post.summarize": "Кратко подытожить",
+  "bg.post.custom": "Свое продолжение",
+  "bg.post.custom_prompt": "Отправьте свой текст для продолжения:",
+  "bg.create.no_session": "⚠️ Нет активной сессии. Используйте /sessions или /new.",
+  "bg.create.plan_mode_blocked":
+    "Фоновая задача не запущена: агент в режиме plan. Переключитесь в build и повторите.",
+  "bg.create.queued": "✅ Фоновая задача поставлена в очередь.",
+  "bg.create.failed": "🔴 Не удалось создать фоновую задачу.",
+  "bg.create.dispatch_timeout": "Фоновый процесс не стартовал вовремя. Повторите в режиме build.",
+  "bg.list.title": "Фоновые задачи:",
+  "bg.list.empty": "📭 Нет фоновых задач.",
+  "bg.list.page": "Страница {page}/{total}",
+  "bg.status.queued": "ожидание",
+  "bg.status.running": "выполняется",
+  "bg.status.succeeded": "готово",
+  "bg.status.failed": "ошибка",
+  "bg.tasks.button.stop": "⏹ Стоп {id}",
+  "bg.tasks.button.restart": "🔁 Повтор {id}",
+  "bg.tasks.button.delete": "🗑 Удалить {id}",
+  "bg.tasks.button.prev": "⬅️ Назад",
+  "bg.tasks.button.next": "Вперед ➡️",
+  "bg.tasks.not_found": "Задача не найдена",
+  "bg.tasks.stop_not_running": "Задача не запущена",
+  "bg.tasks.restart_only_stopped": "Задача ещё активна. Сначала остановите её.",
+  "bg.tasks.delete_only_completed": "Удалять можно только завершенные задачи",
+  "bg.tasks.deleted_callback": "Удалено",
+  "bg.tasks.stopped_callback": "Остановлено",
+  "bg.tasks.restarted_callback": "Перезапущено",
+  "bg.tasks.cancelled": "Отменено пользователем",
   "schedule.tasks.page": "Страница {current}/{total}",
   "schedule.tasks.not_found": "Задача не найдена",
   "schedule.tasks.updated_callback": "Задача обновлена",
@@ -388,7 +426,8 @@ export const ru: I18nDictionary = {
   "schedule.weekday.short.5": "Пт",
   "schedule.weekday.short.6": "Сб",
 
-  "sendfile.usage": "Использование: /sendfile <путь_к_файлу>\n\nПример: /sendfile /path/to/image.png",
+  "sendfile.usage":
+    "Использование: /sendfile <путь_к_файлу>\n\nПример: /sendfile /path/to/image.png",
   "sendfile.file_not_found": "🔴 Файл не найден",
   "sendfile.not_a_file": "🔴 Путь не является файлом",
   "sendfile.too_large": "🔴 Файл слишком большой: {size}КБ (макс {limit}КБ)",

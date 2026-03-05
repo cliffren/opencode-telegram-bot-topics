@@ -29,8 +29,14 @@ import {
   sendfileCommand,
   sendFileByApi,
 } from "./commands/sendfile.js";
-import { captureAndSendScreenshot, isScreenshotRequestText, screenshotCommand } from "./commands/screenshot.js";
+import {
+  captureAndSendScreenshot,
+  isScreenshotRequestText,
+  screenshotCommand,
+} from "./commands/screenshot.js";
 import { processExternalSendFileRequests } from "./external/sendfile-requests.js";
+import { processBgPostActionRequests } from "../bg/post-action-requests.js";
+import { processBgDispatchRequests } from "../bg/dispatch-requests.js";
 import {
   handleQuestionCallback,
   showCurrentQuestion,
@@ -61,12 +67,20 @@ import { processUserPrompt } from "./handlers/prompt.js";
 import { getCurrentSessionByThread } from "./handlers/prompt.js";
 import { handleVoiceMessage } from "./handlers/voice.js";
 import { handleImageMessage } from "./handlers/image.js";
-import {
-  handleScheduleCallback,
-  handleScheduleTextInput,
-} from "./handlers/schedule.js";
+import { handleScheduleCallback, handleScheduleTextInput } from "./handlers/schedule.js";
 import { scheduleCommand } from "./commands/schedule.js";
+import { handleBgCallback, handleBgTextInput } from "./handlers/bg.js";
+import { bgCommand } from "./commands/bg.js";
 import { configureScheduleRunner, ensureScheduleRunnerStarted } from "../schedule/runner.js";
+import {
+  applyBgNotify,
+  findBgTask,
+  isTerminalTask,
+  markBgPostActionResult,
+  reconcileBgTasksByPid,
+  refreshBgTasksCache,
+} from "../bg/manager.js";
+import { dispatchBgTask } from "../bg/dispatch.js";
 
 let botInstance: Bot<Context> | null = null;
 let chatIdInstance: number | null = null;
@@ -113,7 +127,8 @@ const SEND_FILE_INLINE_COMMAND_REGEX = /`\s*\/sendfile\s+([^`]+?)\s*`/gi;
 const SEND_FILE_LINE_COMMAND_REGEX = /^\s*\/?sendfile\s+(.+?)\s*$/i;
 const FILE_PATH_IN_BACKTICKS_REGEX = /`([^`]+\.[a-z0-9]{1,8})`/gi;
 const FILE_PATH_GENERIC_REGEX = /(?:\.{1,2}\/|\/)[^\s"'`，。；;]+\.[a-z0-9]{1,8}/gi;
-const AUTO_SEND_SIGNAL_REGEX = /(已发送|已经发送|发送给你|发给你|send(?:ing)?\s+(?:it|file)?\s*to\s+you|downloaded|saved|已下载|已保存|保存到|generated|已生成)/i;
+const AUTO_SEND_SIGNAL_REGEX =
+  /(已发送|已经发送|发送给你|发给你|send(?:ing)?\s+(?:it|file)?\s*to\s+you|downloaded|saved|已下载|已保存|保存到|generated|已生成)/i;
 const MAX_AUTO_FILES_PER_MESSAGE = 3;
 const SEND_FILE_SELECTION_PREFIX = "sendfile_select:";
 const SEND_FILE_SELECTION_CANCEL_PREFIX = "sendfile_cancel:";
@@ -175,16 +190,16 @@ function parseSendFileDirectives(text: string): SendFileDirectiveParseResult {
     keptLines.push(line);
   }
 
-  const sanitizedText = keptLines.join("\n").replace(/\n{3,}/g, "\n\n").replace(
-    SEND_FILE_DIRECTIVE_REGEX,
-    (_fullMatch: string, rawPath: string) => {
+  const sanitizedText = keptLines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(SEND_FILE_DIRECTIVE_REGEX, (_fullMatch: string, rawPath: string) => {
       const trimmedPath = rawPath.trim();
       if (trimmedPath) {
         filePaths.push(trimmedPath);
       }
       return "";
-    },
-  );
+    });
 
   const dedupedPaths = Array.from(new Set(filePaths));
 
@@ -264,6 +279,9 @@ function extractAutoSendCandidatePaths(text: string): string[] {
 }
 
 function parseAutoSendFilePathsFromAssistantText(text: string): string[] {
+  if (!config.bot.autoSendFiles) {
+    return [];
+  }
   if (!AUTO_SEND_SIGNAL_REGEX.test(text)) {
     return [];
   }
@@ -295,7 +313,10 @@ function isSendFileAckOnly(text: string): boolean {
     return false;
   }
 
-  const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = normalized
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   return lines.length <= 3;
 }
 
@@ -321,7 +342,10 @@ function createSendFileSelectionKeyboard(token: string, candidates: string[]): I
   return keyboard;
 }
 
-async function replySendFileFailure(ctx: Context, reason: "not_found" | "not_file" | "too_large" | "send_error"): Promise<void> {
+async function replySendFileFailure(
+  ctx: Context,
+  reason: "not_found" | "not_file" | "too_large" | "send_error",
+): Promise<void> {
   if (reason === "not_found") {
     await ctx.reply(t("sendfile.file_not_found"));
     return;
@@ -541,7 +565,10 @@ const THINKING_ANIMATION_MAX_INTERVAL_MS = 2200;
 const THINKING_DOT_FRAMES = [".", "..", "..."] as const;
 const STATUS_POST_COMPLETE_SUPPRESS_MS = 2000;
 
-function toSingleLineStatusPreview(text: string, maxLength: number = STATUS_PREVIEW_MAX_LENGTH): string {
+function toSingleLineStatusPreview(
+  text: string,
+  maxLength: number = STATUS_PREVIEW_MAX_LENGTH,
+): string {
   const singleLine = text.replace(/\s+/g, " ").trim();
   if (singleLine.length <= maxLength) {
     return singleLine;
@@ -595,7 +622,10 @@ function shouldSuppressPostCompleteStatus(sessionId: string): boolean {
 }
 
 function buildThinkingStatusText(frameIndex: number): string {
-  const base = t("bot.thinking").trim().replace(/[.。…]+$/u, "").trimEnd();
+  const base = t("bot.thinking")
+    .trim()
+    .replace(/[.。…]+$/u, "")
+    .trimEnd();
   const dots = THINKING_DOT_FRAMES[frameIndex % THINKING_DOT_FRAMES.length];
   if (base.startsWith("💭 ")) {
     const label = base.slice(2);
@@ -629,7 +659,9 @@ function startThinkingAnimation(sessionId: string): void {
 
   const getNextIntervalMs = (): number =>
     THINKING_ANIMATION_MIN_INTERVAL_MS +
-    Math.floor(Math.random() * (THINKING_ANIMATION_MAX_INTERVAL_MS - THINKING_ANIMATION_MIN_INTERVAL_MS + 1));
+    Math.floor(
+      Math.random() * (THINKING_ANIMATION_MAX_INTERVAL_MS - THINKING_ANIMATION_MIN_INTERVAL_MS + 1),
+    );
 
   let nextFrameIndex = 1;
   const tick = (): void => {
@@ -639,7 +671,9 @@ function startThinkingAnimation(sessionId: string): void {
 
     const frameText = buildThinkingStatusText(nextFrameIndex);
     nextFrameIndex = (nextFrameIndex + 1) % THINKING_DOT_FRAMES.length;
-    void enqueueSessionStatusTask(sessionId, () => updateSessionStatusMessage(sessionId, frameText));
+    void enqueueSessionStatusTask(sessionId, () =>
+      updateSessionStatusMessage(sessionId, frameText),
+    );
 
     const nextTimer = setTimeout(tick, getNextIntervalMs());
     thinkingAnimations.set(sessionId, nextTimer);
@@ -760,7 +794,10 @@ async function updateSessionStatusMessage(sessionId: string, text: string): Prom
         disable_notification: true,
         message_thread_id: routeContext.threadId ?? undefined,
       });
-      sessionStatusSlots.set(sessionId, { messageId: message.message_id, lastText: normalizedText });
+      sessionStatusSlots.set(sessionId, {
+        messageId: message.message_id,
+        lastText: normalizedText,
+      });
     } catch (error) {
       const retryAfterSeconds = getRateLimitRetryAfterSeconds(error);
       if (!retryAfterSeconds) {
@@ -781,7 +818,11 @@ async function updateSessionStatusMessage(sessionId: string, text: string): Prom
   }
 
   try {
-    await botInstance.api.editMessageText(routeContext.chatId, existingSlot.messageId, normalizedText);
+    await botInstance.api.editMessageText(
+      routeContext.chatId,
+      existingSlot.messageId,
+      normalizedText,
+    );
     sessionStatusSlots.set(sessionId, { ...existingSlot, lastText: normalizedText });
   } catch (error) {
     const retryAfterSeconds = getRateLimitRetryAfterSeconds(error);
@@ -901,9 +942,9 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       }
 
       const sendFileTriggered = filePaths.length > 0 || autoFilePaths.length > 0;
-      const candidateText = sanitizedText.length > 0 ? sanitizedText : filePaths.length > 0 ? "" : messageText;
-      const textToSend =
-        sendFileTriggered && isSendFileAckOnly(candidateText) ? "" : candidateText;
+      const candidateText =
+        sanitizedText.length > 0 ? sanitizedText : filePaths.length > 0 ? "" : messageText;
+      const textToSend = sendFileTriggered && isSendFileAckOnly(candidateText) ? "" : candidateText;
       const parts = textToSend ? formatSummary(textToSend) : [];
 
       logger.debug(
@@ -1258,6 +1299,10 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 export function createBot(): Bot<Context> {
   clearAllInteractionState("bot_startup");
   toolMessageBatcher.setIntervalSeconds(config.bot.serviceMessagesIntervalSec);
+
+  // Recover any tasks that were left in 'running' state when the bot last shut down.
+  // If the background process is still alive we leave it alone; if it's gone we mark it failed.
+  void reconcileBgTasksByPid();
   logger.info(`[ToolBatcher] Service messages interval: ${config.bot.serviceMessagesIntervalSec}s`);
 
   const botOptions: ConstructorParameters<typeof Bot<Context>>[1] = {};
@@ -1329,6 +1374,91 @@ export function createBot(): Bot<Context> {
     cleanupExpiredSendFileSelections();
 
     void processExternalSendFileRequests(bot, chatIdInstance, threadIdInstance);
+    void processBgDispatchRequests(async (request) => {
+      await refreshBgTasksCache();
+      const task = findBgTask(request.taskId);
+      if (!task || isTerminalTask(task)) {
+        return;
+      }
+
+      bindSessionRouteContext(task.scope.sessionId, {
+        chatId: task.scope.chatId,
+        threadId: task.scope.threadId,
+        directory: task.scope.directory,
+      });
+      chatIdInstance = task.scope.chatId;
+      threadIdInstance = task.scope.threadId;
+
+      await ensureEventSubscription(task.scope.directory);
+
+      const dispatched = await dispatchBgTask(task.id);
+      if (!dispatched.ok) {
+        await applyBgNotify({
+          taskId: task.id,
+          token: task.token,
+          status: "failed",
+          summary: dispatched.error ?? t("bg.create.failed"),
+        });
+        return;
+      }
+
+      await applyBgNotify({
+        taskId: task.id,
+        token: task.token,
+        status: "started",
+      });
+
+      // Give the model up to 5 minutes to process the injected prompt and call
+      // opencode-telegram-job-notify --run-bg, which writes the PID back to settings.
+      // If after that time the task still has no PID it is stuck — mark it failed.
+      setTimeout(() => {
+        safeBackgroundTask({
+          taskName: `bg.start-timeout.${task.id}`,
+          task: async () => {
+            await refreshBgTasksCache();
+            const current = findBgTask(task.id);
+            if (!current || isTerminalTask(current)) {
+              return;
+            }
+            if (current.status === "running" && current.pid) {
+              return;
+            }
+            await applyBgNotify({
+              taskId: task.id,
+              token: task.token,
+              status: "failed",
+              summary: t("bg.create.dispatch_timeout"),
+            });
+          },
+        });
+      }, 300_000);
+    });
+
+    void processBgPostActionRequests(async (request) => {
+      bindSessionRouteContext(request.scope.sessionId, {
+        chatId: request.scope.chatId,
+        threadId: request.scope.threadId,
+        directory: request.scope.directory,
+      });
+      chatIdInstance = request.scope.chatId;
+      threadIdInstance = request.scope.threadId;
+
+      await ensureEventSubscription(request.scope.directory);
+
+      const { error } = await opencodeClient.session.prompt({
+        sessionID: request.scope.sessionId,
+        directory: request.scope.directory,
+        parts: [{ type: "text", text: request.prompt }],
+      });
+
+      if (error) {
+        const errorText = error instanceof Error ? error.message : String(error);
+        await markBgPostActionResult(request.taskId, "failed", errorText);
+        throw error;
+      }
+
+      await markBgPostActionResult(request.taskId, "sent");
+    });
   }, config.external.sendFileRequestPollIntervalMs);
 
   // Log all API calls for diagnostics
@@ -1388,6 +1518,7 @@ export function createBot(): Bot<Context> {
   bot.command("rename", renameCommand);
   bot.command("screenshot", screenshotCommand);
   bot.command("sendfile", sendfileCommand);
+  bot.command("bg", bgCommand);
   bot.command("schedule", scheduleCommand);
 
   bot.on("message:text", unknownCommandMiddleware);
@@ -1414,9 +1545,10 @@ export function createBot(): Bot<Context> {
       const handledCompactConfirm = await handleCompactConfirm(ctx);
       const handledRenameCancel = await handleRenameCancel(ctx);
       const handledSchedule = await handleScheduleCallback(ctx);
+      const handledBg = await handleBgCallback(ctx);
 
       logger.debug(
-        `[Bot] Callback handled: sendFileSelection=${handledSendFileSelection}, inlineCancel=${handledInlineCancel}, session=${handledSession}, deleteSession=${handledDeleteSession}, project=${handledProject}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, rename=${handledRenameCancel}, schedule=${handledSchedule}`,
+        `[Bot] Callback handled: sendFileSelection=${handledSendFileSelection}, inlineCancel=${handledInlineCancel}, session=${handledSession}, deleteSession=${handledDeleteSession}, project=${handledProject}, question=${handledQuestion}, permission=${handledPermission}, agent=${handledAgent}, model=${handledModel}, variant=${handledVariant}, compactConfirm=${handledCompactConfirm}, rename=${handledRenameCancel}, schedule=${handledSchedule}, bg=${handledBg}`,
       );
 
       if (
@@ -1432,7 +1564,8 @@ export function createBot(): Bot<Context> {
         !handledVariant &&
         !handledCompactConfirm &&
         !handledRenameCancel &&
-        !handledSchedule
+        !handledSchedule &&
+        !handledBg
       ) {
         logger.debug("Unknown callback query:", ctx.callbackQuery?.data);
         await ctx.answerCallbackQuery({ text: t("callback.unknown_command") });
@@ -1445,7 +1578,6 @@ export function createBot(): Bot<Context> {
   });
 
   bot.hears(/^(📋|🛠️|💬|🔍|📝|📄|📦|🤖|🔄|🔨|🔮|📚|🗺️|🔥|🦉|🎭|👁️|🐣|⚡) .+ Mode$/, async (ctx) => {
-
     try {
       if (await blockMenuWhileInteractionActive(ctx)) {
         return;
@@ -1547,7 +1679,9 @@ export function createBot(): Bot<Context> {
   const voicePromptDeps = { bot, ensureEventSubscription };
 
   bot.on("message:voice", async (ctx) => {
-    logger.debug(`[Bot] Received voice message, chatId=${ctx.chat.id}, threadId=${getThreadId(ctx)}`);
+    logger.debug(
+      `[Bot] Received voice message, chatId=${ctx.chat.id}, threadId=${getThreadId(ctx)}`,
+    );
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
     threadIdInstance = getThreadId(ctx);
@@ -1557,7 +1691,9 @@ export function createBot(): Bot<Context> {
   });
 
   bot.on("message:audio", async (ctx) => {
-    logger.debug(`[Bot] Received audio message, chatId=${ctx.chat.id}, threadId=${getThreadId(ctx)}`);
+    logger.debug(
+      `[Bot] Received audio message, chatId=${ctx.chat.id}, threadId=${getThreadId(ctx)}`,
+    );
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
     threadIdInstance = getThreadId(ctx);
@@ -1568,7 +1704,9 @@ export function createBot(): Bot<Context> {
 
   // Photo message handler - download and send to OpenCode
   bot.on("message:photo", async (ctx) => {
-    logger.debug(`[Bot] Received photo message, chatId=${ctx.chat.id}, threadId=${getThreadId(ctx)}`);
+    logger.debug(
+      `[Bot] Received photo message, chatId=${ctx.chat.id}, threadId=${getThreadId(ctx)}`,
+    );
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
     threadIdInstance = getThreadId(ctx);
@@ -1580,7 +1718,9 @@ export function createBot(): Bot<Context> {
 
   // Document message handler - download and send to OpenCode
   bot.on("message:document", async (ctx) => {
-    logger.debug(`[Bot] Received document message, chatId=${ctx.chat.id}, threadId=${getThreadId(ctx)}`);
+    logger.debug(
+      `[Bot] Received document message, chatId=${ctx.chat.id}, threadId=${getThreadId(ctx)}`,
+    );
     botInstance = bot;
     chatIdInstance = ctx.chat.id;
     threadIdInstance = getThreadId(ctx);
@@ -1607,6 +1747,11 @@ export function createBot(): Bot<Context> {
 
     const handledRename = await handleRenameTextAnswer(ctx);
     if (handledRename) {
+      return;
+    }
+
+    const handledBgText = await handleBgTextInput(ctx);
+    if (handledBgText) {
       return;
     }
 

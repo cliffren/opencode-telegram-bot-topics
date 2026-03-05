@@ -7,7 +7,8 @@
   "bin": {
     "opencode-telegram-topics": "dist/cli.js",
     "opencode-telegram-topics-sendfile": "dist/tools/sendfile-request-cli.js",
-    "opencode-telegram-sendfile": "dist/tools/sendfile-request-cli.js"
+    "opencode-telegram-sendfile": "dist/tools/sendfile-request-cli.js",
+    "opencode-telegram-job-notify": "dist/tools/job-notify-cli.js"
   },
   "exports": {
     ".": "./dist/index.js",

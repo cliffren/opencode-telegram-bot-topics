@@ -50,7 +50,7 @@ export const en = {
   "start.welcome":
     "👋 Welcome to OpenCode Telegram Bot!\n\nUse commands:\n/projects — select project\n/sessions — session list\n/new — new session\n/agent — switch mode\n/model — select model\n/status — status\n/help — help",
   "help.text":
-    "📖 **Help**\n\n/status - Check server status\n/sessions - Session list\n/new - Create new session\n/help - Help",
+    "📖 **Help**\n\n/status - Check server status\n/sessions - Session list\n/new - Create new session\n/bg - Background tasks\n/help - Help",
 
   "bot.thinking": "💭 Thinking...",
   "bot.project_not_selected":
@@ -122,10 +122,9 @@ export const en = {
   "delete_sessions.select": "Select a session to delete:",
   "delete_sessions.select_sub": "Select a session to delete (main or sub-session):",
   "delete_sessions.select_project_first": "🔴 Project is not selected. Use /projects.",
-  "delete_sessions.confirm_single":
-    "⚠️ Delete session \"{title}\"?\n\nThis action cannot be undone.",
+  "delete_sessions.confirm_single": '⚠️ Delete session "{title}"?\n\nThis action cannot be undone.',
   "delete_sessions.confirm_cascade":
-    "⚠️ Delete main session \"{title}\" and {count} sub-session(s)?\n\nThis action cannot be undone.",
+    '⚠️ Delete main session "{title}" and {count} sub-session(s)?\n\nThis action cannot be undone.',
   "delete_sessions.button.confirm": "✅ Confirm delete",
   "delete_sessions.button.cancel": "❌ Cancel",
   "delete_sessions.deleted": "✅ Deleted {count} session(s).",
@@ -179,8 +178,10 @@ export const en = {
   "opencode_restart.restarting": "🔄 Restarting OpenCode Server...\n\nPort: {port}",
   "opencode_restart.external_running":
     "⚠️ OpenCode Server is running as an external process on port {port}.\n\nFor safety, bot will not restart external processes.",
-  "opencode_restart.stop_error": "🔴 Failed to stop OpenCode Server before restart\n\nError: {error}",
-  "opencode_restart.start_error": "🔴 Failed to start OpenCode Server during restart\n\nError: {error}",
+  "opencode_restart.stop_error":
+    "🔴 Failed to stop OpenCode Server before restart\n\nError: {error}",
+  "opencode_restart.start_error":
+    "🔴 Failed to start OpenCode Server during restart\n\nError: {error}",
   "opencode_restart.started_not_ready":
     "⚠️ OpenCode Server restarted, but is not responding\n\nPort: {port}\nPID: {pid}",
   "opencode_restart.success":
@@ -322,6 +323,7 @@ export const en = {
   "cmd.description.rename": "Rename current session",
   "cmd.description.screenshot": "Capture and send a screenshot",
   "cmd.description.sendfile": "Send a file to chat",
+  "cmd.description.bg": "Background tasks",
   "cmd.description.schedule": "Scheduled tasks",
 
   "schedule.menu.title": "⏰ Schedule tasks\nTimezone: {tz}\n\nChoose an action:",
@@ -351,8 +353,7 @@ export const en = {
   "schedule.invalid.generic": "Schedule input is invalid. Please start again with /schedule.",
   "schedule.create.no_session": "No active session for this chat/topic. Select a session first.",
   "schedule.create.failed": "Failed to create scheduled task.",
-  "schedule.created":
-    "✅ Task created\nID: {id}\nRule: {rule}\nNext run: {next}\nTimezone: {tz}",
+  "schedule.created": "✅ Task created\nID: {id}\nRule: {rule}\nNext run: {next}\nTimezone: {tz}",
   "schedule.tasks.empty": "No scheduled tasks in this chat/topic.",
   "schedule.tasks.header": "📋 Scheduled tasks\nTimezone: {tz}",
   "schedule.tasks.item": "• [{id}] {status} | next: {next}\n  {rule}",
@@ -363,6 +364,43 @@ export const en = {
   "schedule.tasks.button.prev": "⬅️ Prev",
   "schedule.tasks.button.next": "Next ➡️",
   "schedule.tasks.button.page": "{current}/{total}",
+
+  "bg.menu.title": "🧵 Background tasks",
+  "bg.menu.button.new": "➕ New",
+  "bg.menu.button.list": "📋 Task list",
+  "bg.menu.button.back": "⬅️ Back",
+  "bg.prompt.ask": "Send the task prompt for background execution:",
+  "bg.post.choose": "Choose follow-up action:",
+  "bg.post.none": "No follow-up",
+  "bg.post.summarize": "Summarize result",
+  "bg.post.custom": "Custom follow-up",
+  "bg.post.custom_prompt": "Send custom follow-up instructions:",
+  "bg.create.no_session": "⚠️ No active session. Use /sessions or /new.",
+  "bg.create.plan_mode_blocked":
+    "Background task not started because agent is in plan mode. Switch to build mode and retry.",
+  "bg.create.queued": "✅ Background task queued.",
+  "bg.create.failed": "🔴 Failed to create background task.",
+  "bg.create.dispatch_timeout": "Background job did not start in time. Please retry in build mode.",
+  "bg.list.title": "Background tasks:",
+  "bg.list.empty": "📭 No background tasks.",
+  "bg.list.page": "Page {page}/{total}",
+  "bg.status.queued": "queued",
+  "bg.status.running": "running",
+  "bg.status.succeeded": "done",
+  "bg.status.failed": "failed",
+  "bg.tasks.button.stop": "⏹ Stop {id}",
+  "bg.tasks.button.restart": "🔁 Restart {id}",
+  "bg.tasks.button.delete": "🗑 Delete {id}",
+  "bg.tasks.button.prev": "⬅️ Prev",
+  "bg.tasks.button.next": "➡️ Next",
+  "bg.tasks.not_found": "Task not found",
+  "bg.tasks.stop_not_running": "Task is not running",
+  "bg.tasks.restart_only_stopped": "Task is still active. Stop it first before restarting.",
+  "bg.tasks.delete_only_completed": "Only completed tasks can be deleted",
+  "bg.tasks.deleted_callback": "Deleted",
+  "bg.tasks.stopped_callback": "Stopped",
+  "bg.tasks.restarted_callback": "Restarted",
+  "bg.tasks.cancelled": "Cancelled by user",
   "schedule.tasks.page": "Page {current}/{total}",
   "schedule.tasks.not_found": "Task not found",
   "schedule.tasks.updated_callback": "Task updated",

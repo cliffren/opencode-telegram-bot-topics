@@ -7,6 +7,7 @@ import type { PermissionRequest } from "../permission/types.js";
 import type { FileChange } from "../pinned/types.js";
 import { logger } from "../utils/logger.js";
 import { getCurrentProject } from "../settings/manager.js";
+import { config } from "../config.js";
 
 export interface SummaryInfo {
   sessionId: string;
@@ -69,6 +70,40 @@ type ClearedCallback = () => void;
 interface PreparedToolFileContext {
   fileData: CodeFileData | null;
   fileChange: FileChange | null;
+}
+
+function isThinkingTextPart(part: { type: string } & Record<string, unknown>): boolean {
+  if (part.type !== "text") {
+    return false;
+  }
+
+  const metadata =
+    typeof part.metadata === "object" && part.metadata !== null
+      ? (part.metadata as Record<string, unknown>)
+      : undefined;
+  const tagCandidates = [
+    part.kind,
+    part.format,
+    part.role,
+    metadata?.type,
+    metadata?.kind,
+    metadata?.role,
+  ];
+
+  if (tagCandidates.some((value) => value === "reasoning" || value === "thinking")) {
+    return true;
+  }
+
+  const text = typeof part.text === "string" ? part.text.trim() : "";
+  if (!text) {
+    return false;
+  }
+
+  if (text.startsWith("<think>") || text.includes("</think>")) {
+    return true;
+  }
+
+  return /^\s*(thinking|reasoning|thoughts)[:\s]/i.test(text);
 }
 
 function extractFirstUpdatedFileFromTitle(title: string): string {
@@ -409,6 +444,19 @@ class SummaryAggregator {
         });
       }
     } else if (part.type === "text" && "text" in part && part.text) {
+      if (config.bot.hideThinkingMessages && isThinkingTextPart(part)) {
+        if (!this.thinkingFiredForMessages.has(messageID) && this.onThinkingCallback) {
+          this.thinkingFiredForMessages.add(messageID);
+          const callback = this.onThinkingCallback;
+          const sessionID = part.sessionID;
+          setImmediate(() => {
+            if (typeof callback === "function") {
+              callback(sessionID);
+            }
+          });
+        }
+        return;
+      }
       const partHash = this.hashString(part.text);
 
       if (!this.partHashes.has(messageID)) {
@@ -791,7 +839,9 @@ class SummaryAggregator {
     const request = event.properties;
 
     if (!this.isSessionTracked(request.sessionID)) {
-      logger.debug(`[Aggregator] Ignoring permission.asked for untracked session: ${request.sessionID}`);
+      logger.debug(
+        `[Aggregator] Ignoring permission.asked for untracked session: ${request.sessionID}`,
+      );
       return;
     }
 

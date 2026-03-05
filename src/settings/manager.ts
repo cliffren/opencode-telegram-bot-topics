@@ -3,6 +3,7 @@ import path from "node:path";
 import { getRuntimePaths } from "../runtime/paths.js";
 import { logger } from "../utils/logger.js";
 import type { ScheduledTask } from "../schedule/types.js";
+import type { BgTask } from "../bg/types.js";
 
 export interface ProjectInfo {
   id: string;
@@ -44,6 +45,7 @@ export interface Settings {
   serverProcess?: ServerProcessInfo;
   sessionDirectoryCache?: SessionDirectoryCacheInfo;
   scheduledTasks?: ScheduledTask[];
+  bgTasks?: BgTask[];
 }
 
 function getSettingsFilePath(): string {
@@ -65,7 +67,39 @@ async function readSettingsFile(): Promise<Settings> {
 
 let settingsWriteQueue: Promise<void> = Promise.resolve();
 
-function writeSettingsFile(settings: Settings): Promise<void> {
+function getTaskTimestamp(task: BgTask): number {
+  const raw = task.updatedAt || task.createdAt || "";
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function mergeBgTasks(fileTasks?: BgTask[], memoryTasks?: BgTask[]): BgTask[] | undefined {
+  if (!fileTasks && !memoryTasks) {
+    return undefined;
+  }
+
+  const merged = new Map<string, BgTask>();
+  for (const task of fileTasks ?? []) {
+    merged.set(task.id, task);
+  }
+  for (const task of memoryTasks ?? []) {
+    const existing = merged.get(task.id);
+    if (!existing) {
+      merged.set(task.id, task);
+      continue;
+    }
+    const existingTs = getTaskTimestamp(existing);
+    const incomingTs = getTaskTimestamp(task);
+    merged.set(task.id, incomingTs >= existingTs ? task : existing);
+  }
+
+  return Array.from(merged.values());
+}
+
+function writeSettingsFile(
+  settings: Settings,
+  options?: { bgTasksMode?: "merge" | "replace" },
+): Promise<void> {
   settingsWriteQueue = settingsWriteQueue
     .catch(() => {
       // Keep write queue alive after failed writes.
@@ -74,8 +108,22 @@ function writeSettingsFile(settings: Settings): Promise<void> {
       try {
         const fs = await import("fs/promises");
         const settingsFilePath = getSettingsFilePath();
+        const fileSettings = await readSettingsFile();
+        const merged: Settings = {
+          ...fileSettings,
+          ...settings,
+        };
+        if (options?.bgTasksMode === "replace") {
+          merged.bgTasks = settings.bgTasks;
+        } else {
+          const mergedBgTasks = mergeBgTasks(fileSettings.bgTasks, settings.bgTasks);
+          if (mergedBgTasks) {
+            merged.bgTasks = mergedBgTasks;
+          }
+        }
         await fs.mkdir(path.dirname(settingsFilePath), { recursive: true });
-        await fs.writeFile(settingsFilePath, JSON.stringify(settings, null, 2));
+        await fs.writeFile(settingsFilePath, JSON.stringify(merged, null, 2));
+        currentSettings = merged;
       } catch (err) {
         logger.error("[SettingsManager] Error writing settings file:", err);
       }
@@ -267,6 +315,15 @@ export function getScheduledTasks(): ScheduledTask[] {
 export function setScheduledTasks(tasks: ScheduledTask[]): Promise<void> {
   currentSettings.scheduledTasks = [...tasks];
   return writeSettingsFile(currentSettings);
+}
+
+export function getBgTasks(): BgTask[] {
+  return [...(currentSettings.bgTasks ?? [])];
+}
+
+export function setBgTasks(tasks: BgTask[]): Promise<void> {
+  currentSettings.bgTasks = [...tasks];
+  return writeSettingsFile(currentSettings, { bgTasksMode: "replace" });
 }
 
 export function __resetSettingsForTests(): void {
