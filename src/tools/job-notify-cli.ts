@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import dotenv from "dotenv";
 import { getRuntimePaths } from "../runtime/paths.js";
+import { t } from "../i18n/index.js";
 import { loadSettings } from "../settings/manager.js";
 import {
   applyBgNotify,
@@ -102,21 +103,17 @@ async function sendTelegramMessage(
 }
 
 function formatNotifyText(taskTitle: string, status: NotifyStatus, summary?: string): string {
-  const title = taskTitle.trim().length > 0 ? taskTitle.trim() : "后台任务";
-  if (status === "started") {
-    return `🔄 后台任务开始：${title}`;
-  }
-  if (status === "done") {
-    return summary ? `✅ 后台任务成功：${title}\n${summary}` : `✅ 后台任务成功：${title}`;
-  }
-  return summary ? `❌ 后台任务失败：${title}\n${summary}` : `❌ 后台任务失败：${title}`;
+  const title = taskTitle.trim().length > 0 ? taskTitle.trim() : t("bg.notify.default_title");
+  const key = status === "started" ? "bg.notify.started" : status === "done" ? "bg.notify.done" : "bg.notify.failed";
+  const base = t(key, { title });
+  return summary ? `${base}\n${summary}` : base;
 }
 
 function summarizeFromLogPath(logPath: string | undefined): string | undefined {
   if (!logPath || logPath.trim().length === 0) {
     return undefined;
   }
-  return `日志: ${logPath}`;
+  return t("bg.notify.log_path", { path: logPath });
 }
 
 async function applyNotify(parsed: ParsedArgs, telegramToken: string): Promise<void> {

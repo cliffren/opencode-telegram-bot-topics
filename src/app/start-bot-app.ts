@@ -7,6 +7,7 @@ import { processManager } from "../process/manager.js";
 import { warmupSessionDirectoryCache } from "../session/cache-manager.js";
 import { getRuntimeMode } from "../runtime/mode.js";
 import { logger } from "../utils/logger.js";
+import { cleanupBgLogs } from "../bg/logs.js";
 
 async function getBotVersion(): Promise<string> {
   try {
@@ -32,6 +33,12 @@ export async function startBotApp(): Promise<void> {
   await loadSettings();
   await processManager.initialize();
   await warmupSessionDirectoryCache();
+
+  void cleanupBgLogs().catch((err: unknown) => logger.warn("[App] bg log cleanup failed", err));
+  const BG_LOG_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+  setInterval(() => {
+    void cleanupBgLogs().catch((err: unknown) => logger.warn("[App] bg log cleanup failed", err));
+  }, BG_LOG_CLEANUP_INTERVAL_MS).unref();
 
   const bot = createBot();
 
