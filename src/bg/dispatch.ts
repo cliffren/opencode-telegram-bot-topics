@@ -1,6 +1,7 @@
 import { opencodeClient } from "../opencode/client.js";
 import { findBgTask } from "./manager.js";
 import { getRuntimePaths } from "../runtime/paths.js";
+import { getBgLogFilePath } from "./logs.js";
 import os from "node:os";
 import path from "node:path";
 import { existsSync } from "node:fs";
@@ -55,6 +56,7 @@ function resolveNotifyBinary(): string {
 function buildInjectedBgPrompt(task: BgTask): string {
   const runtimePaths = getRuntimePaths();
   const notifyBin = resolveNotifyBinary();
+  const logFilePath = getBgLogFilePath(task.id);
 
   const envPrefix = [
     `OPENCODE_TELEGRAM_RUNTIME_MODE=${runtimePaths.mode}`,
@@ -70,6 +72,8 @@ function buildInjectedBgPrompt(task: BgTask): string {
     shellQuote(task.token),
     "--title",
     shellQuote(task.title),
+    "--log-path",
+    shellQuote(logFilePath),
   ].join(" ");
 
   const wrapperWithPlaceholder = `${commonArgs} --run-bg '<YOUR_COMMAND>'`;
@@ -83,6 +87,9 @@ function buildInjectedBgPrompt(task: BgTask): string {
     "",
     "### Wrapper command (replace <YOUR_COMMAND> with the real shell command):",
     `    ${wrapperWithPlaceholder}`,
+    "",
+    "### Log file:",
+    `    ${logFilePath}`,
     "",
     "### Rules:",
     "1. Replace '<YOUR_COMMAND>' with a single-quoted shell command (escape inner single quotes as '\"'\"' if needed).",
