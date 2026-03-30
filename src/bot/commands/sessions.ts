@@ -473,6 +473,7 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
         selectedSession.id,
         selectedSession.title,
         currentProject.worktree,
+        { recreate: true },
       );
       // Load context from session history (for existing sessions)
       // Wait for it to complete so keyboard has correct context

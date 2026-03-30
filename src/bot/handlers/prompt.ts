@@ -456,6 +456,7 @@ export async function processUserPrompt(
         session.id,
         session.title,
         currentProject.worktree,
+        { recreate: true },
       );
     } catch (err) {
       logger.error("[Bot] Error creating pinned message for new session:", err);

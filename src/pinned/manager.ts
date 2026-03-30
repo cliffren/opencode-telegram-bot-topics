@@ -76,6 +76,7 @@ class PinnedMessageManager {
     sessionId: string,
     sessionTitle: string,
     directory?: string,
+    options?: { recreate?: boolean },
   ): Promise<void> {
     logger.info(`[PinnedManager] Session changed: ${sessionId}, title: ${sessionTitle}`);
 
@@ -100,9 +101,15 @@ class PinnedMessageManager {
     // Reset changed files for new session
     this.state.changedFiles = [];
 
-    // Unpin old message and create new one
-    await this.unpinOldMessage();
-    await this.createPinnedMessage();
+    const shouldRecreate = options?.recreate === true;
+
+    if (!this.state.messageId || shouldRecreate) {
+      // Unpin old message and create new one
+      await this.unpinOldMessage();
+      await this.createPinnedMessage();
+    } else {
+      await this.updatePinnedMessage();
+    }
 
     // Load existing diffs from API (for session restoration)
     await this.loadDiffsFromApi(sessionId);
