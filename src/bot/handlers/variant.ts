@@ -50,6 +50,13 @@ export async function handleVariantSelect(ctx: Context): Promise<boolean> {
 
     if (ctx.chat) {
       keyboardManager.initialize(ctx.api, ctx.chat.id);
+      if (
+        !pinnedMessageManager.isInitialized() ||
+        pinnedMessageManager.getState().chatId !== ctx.chat.id ||
+        pinnedMessageManager.getState().threadId !== threadId
+      ) {
+        pinnedMessageManager.initialize(ctx.api, ctx.chat.id, threadId);
+      }
     }
 
     if (pinnedMessageManager.getContextLimit() === 0) {
@@ -101,7 +108,7 @@ export async function handleVariantSelect(ctx: Context): Promise<boolean> {
     // Send confirmation message with updated keyboard
     const displayName = formatVariantForDisplay(variantId);
 
-    clearActiveInlineMenu("variant_selected");
+    clearActiveInlineMenu("variant_selected", ctx);
 
     await ctx.answerCallbackQuery({ text: t("variant.changed_callback", { name: displayName }) });
     await ctx.reply(t("variant.changed_message", { name: displayName }), {
@@ -113,7 +120,7 @@ export async function handleVariantSelect(ctx: Context): Promise<boolean> {
 
     return true;
   } catch (err) {
-    clearActiveInlineMenu("variant_select_error");
+    clearActiveInlineMenu("variant_select_error", ctx);
     logger.error("[VariantHandler] Error handling variant select:", err);
     await ctx.answerCallbackQuery({ text: t("variant.change_error_callback") }).catch(() => {});
     return false;
@@ -168,7 +175,8 @@ export async function buildVariantSelectionMenu(
  */
 export async function showVariantSelectionMenu(ctx: Context): Promise<void> {
   try {
-    const threadId = ctx.message?.message_thread_id ?? ctx.callbackQuery?.message?.message_thread_id ?? null;
+    const threadId =
+      ctx.message?.message_thread_id ?? ctx.callbackQuery?.message?.message_thread_id ?? null;
     const chatId = ctx.chat?.id ?? null;
     const currentModel = getStoredModel(threadId, chatId);
 

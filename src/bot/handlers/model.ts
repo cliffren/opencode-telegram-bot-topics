@@ -40,15 +40,11 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
   logger.debug(`[ModelHandler] Received callback: ${callbackQuery.data}`);
 
   try {
-    if (ctx.chat) {
-      keyboardManager.initialize(ctx.api, ctx.chat.id);
-    }
-
     // Parse callback data: "model:providerID:modelID"
     const parts = callbackQuery.data.split(":");
     if (parts.length < 3) {
       logger.error(`[ModelHandler] Invalid callback data format: ${callbackQuery.data}`);
-      clearActiveInlineMenu("model_select_invalid_callback");
+      clearActiveInlineMenu("model_select_invalid_callback", ctx);
       await ctx.answerCallbackQuery({ text: t("model.change_error_callback") }).catch(() => {});
       return true;
     }
@@ -70,6 +66,17 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
     logger.debug(
       `[ModelHandler] Resolved selection scope: chatId=${chatId ?? "none"}, threadId=${threadId ?? "private"}`,
     );
+
+    if (ctx.chat) {
+      keyboardManager.initialize(ctx.api, ctx.chat.id);
+      if (
+        !pinnedMessageManager.isInitialized() ||
+        pinnedMessageManager.getState().chatId !== ctx.chat.id ||
+        pinnedMessageManager.getState().threadId !== threadId
+      ) {
+        pinnedMessageManager.initialize(ctx.api, ctx.chat.id, threadId);
+      }
+    }
 
     selectModelForScope(modelInfo, threadId, chatId);
 
@@ -100,7 +107,7 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
     );
     const displayName = formatModelForDisplay(modelInfo.providerID, modelInfo.modelID);
 
-    clearActiveInlineMenu("model_selected");
+    clearActiveInlineMenu("model_selected", ctx);
 
     // Send confirmation message with updated keyboard
     await ctx.answerCallbackQuery({ text: t("model.changed_callback", { name: displayName }) });
@@ -113,7 +120,7 @@ export async function handleModelSelect(ctx: Context): Promise<boolean> {
 
     return true;
   } catch (err) {
-    clearActiveInlineMenu("model_select_error");
+    clearActiveInlineMenu("model_select_error", ctx);
     logger.error("[ModelHandler] Error handling model select:", err);
     await ctx.answerCallbackQuery({ text: t("model.change_error_callback") }).catch(() => {});
     return false;
@@ -157,7 +164,8 @@ export async function buildModelSelectionMenu(currentModel?: ModelInfo): Promise
  */
 export async function showModelSelectionMenu(ctx: Context): Promise<void> {
   try {
-    const threadId = ctx.message?.message_thread_id ?? ctx.callbackQuery?.message?.message_thread_id ?? null;
+    const threadId =
+      ctx.message?.message_thread_id ?? ctx.callbackQuery?.message?.message_thread_id ?? null;
     const chatId = ctx.chat?.id ?? null;
     const currentModel = fetchCurrentModelForScope(threadId, chatId);
     const keyboard = await buildModelSelectionMenu(currentModel);

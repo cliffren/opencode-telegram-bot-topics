@@ -2,7 +2,7 @@ import { CommandContext, Context } from "grammy";
 import { opencodeClient } from "../../opencode/client.js";
 import { setCurrentSession, SessionInfo } from "../../session/manager.js";
 import { ingestSessionInfoForCache } from "../../session/cache-manager.js";
-import { getCurrentProject } from "../../settings/manager.js";
+import { getCurrentProjectForScope } from "../../project/scope.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
@@ -17,7 +17,8 @@ import { t } from "../../i18n/index.js";
 
 export async function newCommand(ctx: CommandContext<Context>) {
   try {
-    const currentProject = getCurrentProject();
+    const threadId = ctx.message?.message_thread_id ?? null;
+    const currentProject = getCurrentProjectForScope(threadId, ctx.chat?.id ?? null);
 
     if (!currentProject) {
       await ctx.reply(t("new.project_not_selected"));
@@ -45,7 +46,6 @@ export async function newCommand(ctx: CommandContext<Context>) {
     };
     setCurrentSession(sessionInfo);
 
-    const threadId = ctx.message?.message_thread_id ?? null;
     logger.info(`[New] Binding new session to threadId=${threadId ?? "none"}`);
     setCurrentSessionByThread(threadId, ctx.chat?.id ?? null);
 
@@ -54,15 +54,23 @@ export async function newCommand(ctx: CommandContext<Context>) {
     await ingestSessionInfoForCache(session);
 
     // Initialize pinned message manager and create pinned message
-    if (!pinnedMessageManager.isInitialized() || pinnedMessageManager.getState().chatId !== ctx.chat.id) {
-      pinnedMessageManager.initialize(ctx.api, ctx.chat.id);
+    if (
+      !pinnedMessageManager.isInitialized() ||
+      pinnedMessageManager.getState().chatId !== ctx.chat.id ||
+      pinnedMessageManager.getState().threadId !== threadId
+    ) {
+      pinnedMessageManager.initialize(ctx.api, ctx.chat.id, threadId);
     }
 
     // Initialize keyboard manager if not already
     keyboardManager.initialize(ctx.api, ctx.chat.id);
 
     try {
-      await pinnedMessageManager.onSessionChange(session.id, session.title);
+      await pinnedMessageManager.onSessionChange(
+        session.id,
+        session.title,
+        currentProject.worktree,
+      );
     } catch (err) {
       logger.error("[Bot] Error creating pinned message:", err);
     }

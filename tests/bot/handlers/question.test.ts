@@ -38,6 +38,8 @@ const MULTIPLE_QUESTION: Question = {
   ],
 };
 
+const DEFAULT_ROUTE = { chatId: 123, threadId: null, sessionId: "session-1" };
+
 function createApi(sendMessageIds: number[]): Context["api"] {
   let index = 0;
 
@@ -88,38 +90,39 @@ describe("bot/handlers/question", () => {
   it("starts question interaction in callback mode when showing question", async () => {
     const api = createApi([100]);
 
-    questionManager.startQuestions([QUESTION_ONE], "req-1");
-    await showCurrentQuestion(api, 123);
+    questionManager.startQuestions([QUESTION_ONE], "req-1", DEFAULT_ROUTE);
+    await showCurrentQuestion(api, 123, "123:private");
 
-    expect(questionManager.getActiveMessageId()).toBe(100);
+    expect(questionManager.getActiveMessageId("123:private")).toBe(100);
 
     const state = interactionManager.getSnapshot();
-    expect(state?.kind).toBe("question");
-    expect(state?.expectedInput).toBe("callback");
-    expect(state?.metadata.requestID).toBe("req-1");
-    expect(state?.metadata.messageId).toBe(100);
-    expect(state?.metadata.questionIndex).toBe(0);
+    const scopedState = interactionManager.getSnapshot("123:private");
+    expect(scopedState?.kind).toBe("question");
+    expect(scopedState?.expectedInput).toBe("callback");
+    expect(scopedState?.metadata.requestID).toBe("req-1");
+    expect(scopedState?.metadata.messageId).toBe(100);
+    expect(scopedState?.metadata.questionIndex).toBe(0);
   });
 
   it("switches to mixed mode on custom callback and accepts custom text", async () => {
     const api = createApi([101, 102]);
 
-    questionManager.startQuestions([QUESTION_ONE, QUESTION_TWO], "req-2");
-    await showCurrentQuestion(api, 123);
+    questionManager.startQuestions([QUESTION_ONE, QUESTION_TWO], "req-2", DEFAULT_ROUTE);
+    await showCurrentQuestion(api, 123, "123:private");
 
     const customCtx = createCallbackContext("question:custom:0", 101, api);
     await handleQuestionCallback(customCtx);
 
-    expect(questionManager.isWaitingForCustomInput(0)).toBe(true);
-    expect(interactionManager.getSnapshot()?.expectedInput).toBe("mixed");
+    expect(questionManager.isWaitingForCustomInput(0, "123:private")).toBe(true);
+    expect(interactionManager.getSnapshot("123:private")?.expectedInput).toBe("mixed");
 
     const textCtx = createTextContext("My custom answer", api);
     await handleQuestionTextAnswer(textCtx);
 
-    expect(questionManager.getCustomAnswer(0)).toBe("My custom answer");
-    expect(questionManager.getCurrentIndex()).toBe(1);
-    expect(questionManager.getActiveMessageId()).toBe(102);
-    expect(interactionManager.getSnapshot()?.expectedInput).toBe("callback");
+    expect(questionManager.getCustomAnswer(0, "123:private")).toBe("My custom answer");
+    expect(questionManager.getCurrentIndex("123:private")).toBe(1);
+    expect(questionManager.getActiveMessageId("123:private")).toBe(102);
+    expect(interactionManager.getSnapshot("123:private")?.expectedInput).toBe("callback");
 
     expect(api.deleteMessage).toHaveBeenCalledWith(123, 101);
   });
@@ -127,8 +130,8 @@ describe("bot/handlers/question", () => {
   it("rejects stale callback from old question message", async () => {
     const api = createApi([200]);
 
-    questionManager.startQuestions([QUESTION_ONE], "req-3");
-    await showCurrentQuestion(api, 123);
+    questionManager.startQuestions([QUESTION_ONE], "req-3", DEFAULT_ROUTE);
+    await showCurrentQuestion(api, 123, "123:private");
 
     const staleCtx = createCallbackContext("question:select:0:0", 199, api);
     const handled = await handleQuestionCallback(staleCtx);
@@ -138,30 +141,30 @@ describe("bot/handlers/question", () => {
       text: t("question.inactive_callback"),
       show_alert: true,
     });
-    expect(questionManager.getSelectedOptions(0)).toEqual(new Set<number>());
+    expect(questionManager.getSelectedOptions(0, "123:private")).toEqual(new Set<number>());
   });
 
   it("cancels poll and clears question interaction", async () => {
     const api = createApi([300]);
 
-    questionManager.startQuestions([QUESTION_ONE], "req-4");
-    await showCurrentQuestion(api, 123);
+    questionManager.startQuestions([QUESTION_ONE], "req-4", DEFAULT_ROUTE);
+    await showCurrentQuestion(api, 123, "123:private");
 
     const cancelCtx = createCallbackContext("question:cancel:0", 300, api);
     const handled = await handleQuestionCallback(cancelCtx);
 
     expect(handled).toBe(true);
     expect(cancelCtx.editMessageText).toHaveBeenCalledWith(t("question.cancelled"));
-    expect(questionManager.isActive()).toBe(false);
-    expect(questionManager.getTotalQuestions()).toBe(0);
+    expect(questionManager.isActive("123:private")).toBe(false);
+    expect(questionManager.getTotalQuestions("123:private")).toBe(0);
     expect(interactionManager.getSnapshot()).toBeNull();
   });
 
   it("requires at least one selected option on multiple submit", async () => {
     const api = createApi([400]);
 
-    questionManager.startQuestions([MULTIPLE_QUESTION], "req-5");
-    await showCurrentQuestion(api, 123);
+    questionManager.startQuestions([MULTIPLE_QUESTION], "req-5", DEFAULT_ROUTE);
+    await showCurrentQuestion(api, 123, "123:private");
 
     const submitCtx = createCallbackContext("question:submit:0", 400, api);
     const handled = await handleQuestionCallback(submitCtx);
@@ -171,6 +174,26 @@ describe("bot/handlers/question", () => {
       text: t("question.select_one_required_callback"),
       show_alert: true,
     });
-    expect(questionManager.isActive()).toBe(true);
+    expect(questionManager.isActive("123:private")).toBe(true);
+  });
+
+  it("keeps question state isolated per scope", () => {
+    questionManager.startQuestions([QUESTION_ONE], "req-a", {
+      chatId: 123,
+      threadId: 10,
+      sessionId: "session-a",
+    });
+    questionManager.startQuestions([QUESTION_TWO], "req-b", {
+      chatId: 123,
+      threadId: 20,
+      sessionId: "session-b",
+    });
+
+    expect(questionManager.isActive("123:10")).toBe(true);
+    expect(questionManager.isActive("123:20")).toBe(true);
+    expect(questionManager.getRequestID("123:10")).toBe("req-a");
+    expect(questionManager.getRequestID("123:20")).toBe("req-b");
+    expect(questionManager.getCurrentQuestion("123:10")?.header).toBe("Q1");
+    expect(questionManager.getCurrentQuestion("123:20")?.header).toBe("Q2");
   });
 });

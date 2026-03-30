@@ -40,19 +40,26 @@ export async function handleAgentSelect(ctx: Context): Promise<boolean> {
   logger.debug(`[AgentHandler] Received callback: ${callbackQuery.data}`);
 
   try {
-    if (ctx.chat) {
-      keyboardManager.initialize(ctx.api, ctx.chat.id);
-    }
-
-    if (pinnedMessageManager.getContextLimit() === 0) {
-      await pinnedMessageManager.refreshContextLimit();
-    }
-
     const agentName = callbackQuery.data.replace("agent:", "");
 
     const scope = resolveInlineInteractionScope(ctx);
     const threadId = scope.threadId;
     const chatId = scope.chatId;
+
+    if (ctx.chat) {
+      keyboardManager.initialize(ctx.api, ctx.chat.id);
+      if (
+        !pinnedMessageManager.isInitialized() ||
+        pinnedMessageManager.getState().chatId !== ctx.chat.id ||
+        pinnedMessageManager.getState().threadId !== threadId
+      ) {
+        pinnedMessageManager.initialize(ctx.api, ctx.chat.id, threadId);
+      }
+    }
+
+    if (pinnedMessageManager.getContextLimit() === 0) {
+      await pinnedMessageManager.refreshContextLimit();
+    }
 
     // Select agent and persist
     selectAgentForScope(agentName, threadId, chatId);
@@ -84,7 +91,7 @@ export async function handleAgentSelect(ctx: Context): Promise<boolean> {
     );
     const displayName = getAgentDisplayName(agentName);
 
-    clearActiveInlineMenu("agent_selected");
+    clearActiveInlineMenu("agent_selected", ctx);
 
     // Send confirmation message with updated keyboard
     await ctx.answerCallbackQuery({ text: t("agent.changed_callback", { name: displayName }) });
@@ -97,7 +104,7 @@ export async function handleAgentSelect(ctx: Context): Promise<boolean> {
 
     return true;
   } catch (err) {
-    clearActiveInlineMenu("agent_select_error");
+    clearActiveInlineMenu("agent_select_error", ctx);
     logger.error("[AgentHandler] Error handling agent select:", err);
     await ctx.answerCallbackQuery({ text: t("agent.change_error_callback") }).catch(() => {});
     return false;
@@ -109,9 +116,13 @@ export async function handleAgentSelect(ctx: Context): Promise<boolean> {
  * @param currentAgent Current agent name for highlighting
  * @returns InlineKeyboard with agent selection buttons
  */
-export async function buildAgentSelectionMenu(currentAgent?: string): Promise<InlineKeyboard> {
+export async function buildAgentSelectionMenu(
+  currentAgent?: string,
+  threadId: number | null = null,
+  chatId: number | null = null,
+): Promise<InlineKeyboard> {
   const keyboard = new InlineKeyboard();
-  const agents = await getAvailableAgents();
+  const agents = await getAvailableAgents(threadId, chatId);
 
   if (agents.length === 0) {
     logger.warn("[AgentHandler] No available agents found");
@@ -141,7 +152,7 @@ export async function showAgentSelectionMenu(ctx: Context): Promise<void> {
   const currentAgent =
     (await fetchCurrentAgent(scope.threadId, scope.chatId)) ??
     getStoredAgent(scope.threadId, scope.chatId);
-  const keyboard = await buildAgentSelectionMenu(currentAgent);
+  const keyboard = await buildAgentSelectionMenu(currentAgent, scope.threadId, scope.chatId);
 
   const text = currentAgent
     ? t("agent.menu.current", { name: getAgentDisplayName(currentAgent) })

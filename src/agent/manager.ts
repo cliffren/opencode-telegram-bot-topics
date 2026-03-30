@@ -1,8 +1,9 @@
 import { opencodeClient } from "../opencode/client.js";
-import { getCurrentProject } from "../settings/manager.js";
-import { getCurrentSession } from "../session/manager.js";
+import { getCurrentProjectForScope } from "../project/scope.js";
 import {
   getCurrentAgent,
+  getCurrentSession,
+  getScopedSession,
   getScopedAgent,
   setCurrentAgent,
   setScopedAgent,
@@ -18,8 +19,11 @@ export function getAgentScopeKey(chatId: number | null, threadId: number | null)
  * Get list of available agents from OpenCode API
  * @returns Array of available agents (filtered by mode and hidden flag)
  */
-export async function getAvailableAgents(): Promise<AgentInfo[]> {
-  const project = getCurrentProject();
+export async function getAvailableAgents(
+  threadId: number | null = null,
+  chatId: number | null = null,
+): Promise<AgentInfo[]> {
+  const project = getCurrentProjectForScope(threadId, chatId);
   if (!project) {
     logger.warn("[AgentManager] Cannot get agents: no project selected");
     return [];
@@ -62,8 +66,11 @@ export async function fetchCurrentAgent(
 ): Promise<string | undefined> {
   const scopedAgent = getScopedAgent(getAgentScopeKey(chatId, threadId));
   const storedAgent = scopedAgent ?? getCurrentAgent();
-  const session = getCurrentSession();
-  const project = getCurrentProject();
+  const session =
+    chatId === null && threadId === null
+      ? getCurrentSession()
+      : getScopedSession(getAgentScopeKey(chatId, threadId));
+  const project = getCurrentProjectForScope(threadId, chatId);
 
   if (!session || !project) {
     // No active session, return stored agent from settings
@@ -133,7 +140,10 @@ export function selectAgentForScope(
  * Get stored agent from settings (synchronous)
  * @returns Current agent name or default "build"
  */
-export function getStoredAgent(threadId: number | null = null, chatId: number | null = null): string {
+export function getStoredAgent(
+  threadId: number | null = null,
+  chatId: number | null = null,
+): string {
   const scopedAgent = getScopedAgent(getAgentScopeKey(chatId, threadId));
   if (scopedAgent) {
     return scopedAgent;

@@ -1,5 +1,6 @@
 import { Context, InlineKeyboard } from "grammy";
 import { interactionManager } from "../../interaction/manager.js";
+import { getInteractionScopeKey } from "../../interaction/scope.js";
 import type { InteractionState } from "../../interaction/types.js";
 import {
   createScheduledTask,
@@ -62,8 +63,11 @@ function getScope(ctx: Context): { chatId: number | null; threadId: number | nul
   };
 }
 
-function getActiveScheduleState(): { state: InteractionState; metadata: ScheduleInteractionMetadata } | null {
-  const state = interactionManager.getSnapshot();
+function getActiveScheduleState(scopeKey?: string): {
+  state: InteractionState;
+  metadata: ScheduleInteractionMetadata;
+} | null {
+  const state = interactionManager.getSnapshot(scopeKey);
   if (!state || state.kind !== "custom") {
     return null;
   }
@@ -110,42 +114,50 @@ function startScheduleInteraction(
   draft?: ScheduleDraft,
 ): void {
   const scope = getScope(ctx);
-  interactionManager.start({
-    kind: "custom",
-    expectedInput: step === "main" ? "callback" : "mixed",
-    allowedCommands: SCHEDULE_ALLOWED_COMMANDS,
-    metadata: {
-      flow: "schedule",
-      step,
-      messageId,
-      interactionChatId: scope.chatId,
-      interactionThreadId: scope.threadId,
-      draft,
+  const scopeKey = getInteractionScopeKey(scope.chatId, scope.threadId);
+  interactionManager.start(
+    {
+      kind: "custom",
+      expectedInput: step === "main" ? "callback" : "mixed",
+      allowedCommands: SCHEDULE_ALLOWED_COMMANDS,
+      metadata: {
+        flow: "schedule",
+        step,
+        messageId,
+        interactionChatId: scope.chatId,
+        interactionThreadId: scope.threadId,
+        draft,
+      },
     },
-  });
+    scopeKey,
+  );
 }
 
 function transitionScheduleInteraction(
   step: ScheduleCreateStep,
   metadata: ScheduleInteractionMetadata,
 ): void {
-  interactionManager.transition({
-    expectedInput: step === "main" ? "callback" : "mixed",
-    allowedCommands: SCHEDULE_ALLOWED_COMMANDS,
-    metadata: {
-      ...metadata,
-      step,
+  const scopeKey = getInteractionScopeKey(metadata.interactionChatId, metadata.interactionThreadId);
+  interactionManager.transition(
+    {
+      expectedInput: step === "main" ? "callback" : "mixed",
+      allowedCommands: SCHEDULE_ALLOWED_COMMANDS,
+      metadata: {
+        ...metadata,
+        step,
+      },
     },
-  });
+    scopeKey,
+  );
 }
 
-function clearScheduleInteraction(): void {
-  const active = getActiveScheduleState();
+function clearScheduleInteraction(scopeKey?: string): void {
+  const active = getActiveScheduleState(scopeKey);
   if (!active) {
     return;
   }
 
-  interactionManager.clear("schedule_finished");
+  interactionManager.clear("schedule_finished", scopeKey);
 }
 
 async function removeScheduleMenuMessage(
@@ -164,11 +176,11 @@ async function removeScheduleMenuMessage(
   await ctx.api.deleteMessage(chatId, metadata.messageId).catch(() => {});
 }
 
-function ensureSessionForCreate(ctx: Context): { id: string; title: string; directory: string } | null {
+function ensureSessionForCreate(
+  ctx: Context,
+): { id: string; title: string; directory: string } | null {
   const scope = getScope(ctx);
-  const scopedSession = getCurrentSessionByThread(scope.threadId, scope.chatId);
-  const fallbackSession = getCurrentSession();
-  return scopedSession ?? fallbackSession;
+  return getCurrentSessionByThread(scope.threadId, scope.chatId);
 }
 
 function formatTaskTime(isoTime: string | null): string {
@@ -250,16 +262,25 @@ function buildTasksKeyboard(chatId: number, threadId: number | null, page: numbe
 
   if (maxPage > 0) {
     if (safePage > 0) {
-      keyboard.text(t("schedule.tasks.button.prev"), `${SCHEDULE_CALLBACK_PREFIX}page:${safePage - 1}`);
+      keyboard.text(
+        t("schedule.tasks.button.prev"),
+        `${SCHEDULE_CALLBACK_PREFIX}page:${safePage - 1}`,
+      );
     }
 
     keyboard.text(
-      t("schedule.tasks.button.page", { current: String(safePage + 1), total: String(maxPage + 1) }),
+      t("schedule.tasks.button.page", {
+        current: String(safePage + 1),
+        total: String(maxPage + 1),
+      }),
       `${SCHEDULE_CALLBACK_PREFIX}noop`,
     );
 
     if (safePage < maxPage) {
-      keyboard.text(t("schedule.tasks.button.next"), `${SCHEDULE_CALLBACK_PREFIX}page:${safePage + 1}`);
+      keyboard.text(
+        t("schedule.tasks.button.next"),
+        `${SCHEDULE_CALLBACK_PREFIX}page:${safePage + 1}`,
+      );
     }
     keyboard.row();
   }
@@ -377,7 +398,16 @@ function describeRule(rule: ScheduleRule): string {
   }
 
   if (rule.type === "recurring_weekly") {
-    const shortDayKeyByIndex: Record<WeeklyDay, "schedule.weekday.short.0" | "schedule.weekday.short.1" | "schedule.weekday.short.2" | "schedule.weekday.short.3" | "schedule.weekday.short.4" | "schedule.weekday.short.5" | "schedule.weekday.short.6"> = {
+    const shortDayKeyByIndex: Record<
+      WeeklyDay,
+      | "schedule.weekday.short.0"
+      | "schedule.weekday.short.1"
+      | "schedule.weekday.short.2"
+      | "schedule.weekday.short.3"
+      | "schedule.weekday.short.4"
+      | "schedule.weekday.short.5"
+      | "schedule.weekday.short.6"
+    > = {
       0: "schedule.weekday.short.0",
       1: "schedule.weekday.short.1",
       2: "schedule.weekday.short.2",
@@ -451,7 +481,8 @@ async function beginPromptStep(ctx: Context, metadata: ScheduleInteractionMetada
 }
 
 export async function scheduleCommand(ctx: Context): Promise<void> {
-  clearScheduleInteraction();
+  const scope = getScope(ctx);
+  clearScheduleInteraction(getInteractionScopeKey(scope.chatId, scope.threadId));
   await showMainMenu(ctx);
 }
 
@@ -461,18 +492,20 @@ export async function handleScheduleCallback(ctx: Context): Promise<boolean> {
     return false;
   }
 
-  const active = getActiveScheduleState();
+  const scope = getScope(ctx);
+  const scopeKey = getInteractionScopeKey(scope.chatId, scope.threadId);
+  const active = getActiveScheduleState(scopeKey);
   if (!active) {
-    await ctx.answerCallbackQuery({ text: t("schedule.inactive_callback"), show_alert: true }).catch(() => {});
+    await ctx
+      .answerCallbackQuery({ text: t("schedule.inactive_callback"), show_alert: true })
+      .catch(() => {});
     return true;
   }
 
   const action = data.slice(SCHEDULE_CALLBACK_PREFIX.length);
   const metadata = active.metadata;
-  const scope = getScope(ctx);
-
   if (action === "cancel") {
-    clearScheduleInteraction();
+    clearScheduleInteraction(scopeKey);
     await ctx.answerCallbackQuery({ text: t("inline.cancelled_callback") }).catch(() => {});
     await ctx.deleteMessage().catch(() => {});
     return true;
@@ -533,14 +566,23 @@ export async function handleScheduleCallback(ctx: Context): Promise<boolean> {
     const page = Number.parseInt(pageRaw ?? "0", 10);
     const changed = await toggleScheduledTaskPause(taskId);
     if (!changed) {
-      await ctx.answerCallbackQuery({ text: t("schedule.tasks.not_found"), show_alert: true }).catch(() => {});
+      await ctx
+        .answerCallbackQuery({ text: t("schedule.tasks.not_found"), show_alert: true })
+        .catch(() => {});
       return true;
     }
 
     if (scope.chatId !== null) {
-      await ctx.editMessageText(formatTaskListPageMessage(scope.chatId, scope.threadId, Number.isNaN(page) ? 0 : page), {
-        reply_markup: buildTasksKeyboard(scope.chatId, scope.threadId, Number.isNaN(page) ? 0 : page),
-      });
+      await ctx.editMessageText(
+        formatTaskListPageMessage(scope.chatId, scope.threadId, Number.isNaN(page) ? 0 : page),
+        {
+          reply_markup: buildTasksKeyboard(
+            scope.chatId,
+            scope.threadId,
+            Number.isNaN(page) ? 0 : page,
+          ),
+        },
+      );
     }
     await ctx.answerCallbackQuery({ text: t("schedule.tasks.updated_callback") }).catch(() => {});
     return true;
@@ -552,14 +594,23 @@ export async function handleScheduleCallback(ctx: Context): Promise<boolean> {
     const page = Number.parseInt(pageRaw ?? "0", 10);
     const deleted = await deleteScheduledTask(taskId);
     if (!deleted) {
-      await ctx.answerCallbackQuery({ text: t("schedule.tasks.not_found"), show_alert: true }).catch(() => {});
+      await ctx
+        .answerCallbackQuery({ text: t("schedule.tasks.not_found"), show_alert: true })
+        .catch(() => {});
       return true;
     }
 
     if (scope.chatId !== null) {
-      await ctx.editMessageText(formatTaskListPageMessage(scope.chatId, scope.threadId, Number.isNaN(page) ? 0 : page), {
-        reply_markup: buildTasksKeyboard(scope.chatId, scope.threadId, Number.isNaN(page) ? 0 : page),
-      });
+      await ctx.editMessageText(
+        formatTaskListPageMessage(scope.chatId, scope.threadId, Number.isNaN(page) ? 0 : page),
+        {
+          reply_markup: buildTasksKeyboard(
+            scope.chatId,
+            scope.threadId,
+            Number.isNaN(page) ? 0 : page,
+          ),
+        },
+      );
     }
     await ctx.answerCallbackQuery({ text: t("schedule.tasks.deleted_callback") }).catch(() => {});
     return true;
@@ -639,7 +690,9 @@ export async function handleScheduleTextInput(ctx: Context): Promise<boolean> {
     return false;
   }
 
-  const active = getActiveScheduleState();
+  const scope = getScope(ctx);
+  const scopeKey = getInteractionScopeKey(scope.chatId, scope.threadId);
+  const active = getActiveScheduleState(scopeKey);
   if (!active) {
     return false;
   }
@@ -762,13 +815,13 @@ export async function handleScheduleTextInput(ctx: Context): Promise<boolean> {
 
     if (!rule) {
       await ctx.reply(t("schedule.invalid.generic"));
-      clearScheduleInteraction();
+      clearScheduleInteraction(scopeKey);
       return true;
     }
 
     if (!session || scope.chatId === null) {
       await ctx.reply(t("schedule.create.no_session"));
-      clearScheduleInteraction();
+      clearScheduleInteraction(scopeKey);
       return true;
     }
 
@@ -786,7 +839,7 @@ export async function handleScheduleTextInput(ctx: Context): Promise<boolean> {
       });
 
       await removeScheduleMenuMessage(ctx, metadata);
-      clearScheduleInteraction();
+      clearScheduleInteraction(scopeKey);
       await ctx.reply(
         t("schedule.created", {
           id: formatShortTaskId(created.id),
@@ -798,7 +851,7 @@ export async function handleScheduleTextInput(ctx: Context): Promise<boolean> {
     } catch (error) {
       logger.error("[Schedule] Failed to create task", error);
       await ctx.reply(t("schedule.create.failed"));
-      clearScheduleInteraction();
+      clearScheduleInteraction(scopeKey);
     }
 
     return true;

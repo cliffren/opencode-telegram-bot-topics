@@ -2,7 +2,7 @@ import { CommandContext, Context, InlineKeyboard } from "grammy";
 import { opencodeClient } from "../../opencode/client.js";
 import { config } from "../../config.js";
 import { clearSession, getCurrentSession } from "../../session/manager.js";
-import { getCurrentProject } from "../../settings/manager.js";
+import { getCurrentProjectForScope } from "../../project/scope.js";
 import { keyboardManager } from "../../keyboard/manager.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
 import { clearSessionByThread, getCurrentSessionByThread } from "../handlers/prompt.js";
@@ -122,13 +122,20 @@ function buildSubDeleteMenu(
 
 function buildDeleteConfirmMenu(threadToken: string, sessionId: string): InlineKeyboard {
   const keyboard = new InlineKeyboard();
-  keyboard.text(t("delete_sessions.button.confirm"), `delete_session:${threadToken}:x:${sessionId}`).row();
+  keyboard
+    .text(t("delete_sessions.button.confirm"), `delete_session:${threadToken}:x:${sessionId}`)
+    .row();
   return appendInlineMenuCancelButton(keyboard, "delete_session");
 }
 
-function getCascadeDeleteIds(rootSessions: SessionWithChildren[], targetSessionId: string): string[] {
+function getCascadeDeleteIds(
+  rootSessions: SessionWithChildren[],
+  targetSessionId: string,
+): string[] {
   const matchedRoot = rootSessions.find(
-    (root) => root.id === targetSessionId || Boolean(root.children?.some((child) => child.id === targetSessionId)),
+    (root) =>
+      root.id === targetSessionId ||
+      Boolean(root.children?.some((child) => child.id === targetSessionId)),
   );
 
   if (!matchedRoot) {
@@ -150,7 +157,8 @@ function getThreadTokenFromContext(ctx: CommandContext<Context>): string {
 
 export async function deleteSessionsCommand(ctx: CommandContext<Context>): Promise<void> {
   try {
-    const currentProject = getCurrentProject();
+    const currentThreadId = ctx.message?.message_thread_id ?? null;
+    const currentProject = getCurrentProjectForScope(currentThreadId, ctx.chat?.id ?? null);
 
     if (!currentProject) {
       await ctx.reply(t("delete_sessions.project_not_selected"));
@@ -206,9 +214,9 @@ export async function handleDeleteSessionSelect(ctx: Context): Promise<boolean> 
   }
 
   try {
-    const currentProject = getCurrentProject();
+    const currentProject = getCurrentProjectForScope(callbackThreadId, ctx.chat?.id ?? null);
     if (!currentProject) {
-      clearActiveInlineMenu("delete_sessions_project_missing");
+      clearActiveInlineMenu("delete_sessions_project_missing", ctx);
       await ctx.answerCallbackQuery();
       await ctx.reply(t("delete_sessions.select_project_first"));
       return true;
@@ -218,7 +226,7 @@ export async function handleDeleteSessionSelect(ctx: Context): Promise<boolean> 
     const rootSessions = await loadRootSessionsForMenu(currentProject.worktree);
 
     if (rootSessions.length === 0) {
-      clearActiveInlineMenu("delete_sessions_empty_after_callback");
+      clearActiveInlineMenu("delete_sessions_empty_after_callback", ctx);
       await ctx.editMessageText(t("delete_sessions.empty"));
       await ctx.answerCallbackQuery();
       return true;
@@ -249,7 +257,12 @@ export async function handleDeleteSessionSelect(ctx: Context): Promise<boolean> 
         throw new Error(`Invalid root session index: ${rootIndex}`);
       }
 
-      const subMenuKeyboard = buildSubDeleteMenu(mainSession, rootIndex, threadToken, localeForDate);
+      const subMenuKeyboard = buildSubDeleteMenu(
+        mainSession,
+        rootIndex,
+        threadToken,
+        localeForDate,
+      );
       try {
         await ctx.editMessageText(t("delete_sessions.select_sub"), {
           reply_markup: subMenuKeyboard,
@@ -324,7 +337,10 @@ export async function handleDeleteSessionSelect(ctx: Context): Promise<boolean> 
         ctx.chat?.id ?? null,
       );
       if (threadScopedCurrentSession && deletedIds.has(threadScopedCurrentSession.id)) {
-        clearSessionByThread(Number.isNaN(callbackThreadId as number) ? null : callbackThreadId, ctx.chat?.id ?? null);
+        clearSessionByThread(
+          Number.isNaN(callbackThreadId as number) ? null : callbackThreadId,
+          ctx.chat?.id ?? null,
+        );
       }
 
       const currentSession = getCurrentSession();
@@ -335,6 +351,8 @@ export async function handleDeleteSessionSelect(ctx: Context): Promise<boolean> 
       if (
         pinnedMessageManager.isInitialized() &&
         pinnedMessageManager.getState().chatId === (ctx.chat?.id ?? null) &&
+        pinnedMessageManager.getState().threadId ===
+          (Number.isNaN(callbackThreadId as number) ? null : callbackThreadId) &&
         pinnedMessageManager.getState().sessionId !== null &&
         deletedIds.has(pinnedMessageManager.getState().sessionId as string)
       ) {
@@ -344,10 +362,14 @@ export async function handleDeleteSessionSelect(ctx: Context): Promise<boolean> 
 
       const refreshedRootSessions = await loadRootSessionsForMenu(currentProject.worktree);
       if (refreshedRootSessions.length === 0) {
-        clearActiveInlineMenu("delete_sessions_empty_after_delete");
+        clearActiveInlineMenu("delete_sessions_empty_after_delete", ctx);
         await ctx.editMessageText(t("delete_sessions.empty"));
       } else {
-        const refreshedKeyboard = buildRootDeleteMenu(refreshedRootSessions, threadToken, localeForDate);
+        const refreshedKeyboard = buildRootDeleteMenu(
+          refreshedRootSessions,
+          threadToken,
+          localeForDate,
+        );
         await ctx.editMessageText(t("delete_sessions.deleted", { count: deletedIds.size }), {
           reply_markup: appendInlineMenuCancelButton(refreshedKeyboard, "delete_session"),
         });

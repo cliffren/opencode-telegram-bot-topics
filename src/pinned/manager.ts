@@ -3,10 +3,12 @@ import { logger } from "../utils/logger.js";
 import { opencodeClient } from "../opencode/client.js";
 import { getCurrentSession } from "../session/manager.js";
 import {
-  getCurrentProject,
-  getPinnedMessageId,
-  setPinnedMessageId,
   clearPinnedMessageId,
+  clearScopedPinnedMessageId,
+  getPinnedMessageId,
+  getScopedPinnedMessageId,
+  setPinnedMessageId,
+  setScopedPinnedMessageId,
 } from "../settings/manager.js";
 import { getStoredModel } from "../model/manager.js";
 import type { FileChange, PinnedMessageState, TokensInfo } from "./types.js";
@@ -18,10 +20,13 @@ class PinnedMessageManager {
 
   private api: Api | null = null;
   private chatId: number | null = null;
+  private threadId: number | null = null;
   private state: PinnedMessageState = {
     messageId: null,
     chatId: null,
+    threadId: null,
     sessionId: null,
+    directory: null,
     sessionTitle: t("pinned.default_session_title"),
     projectName: "",
     tokensUsed: 0,
@@ -36,25 +41,42 @@ class PinnedMessageManager {
   private updateQueued = false;
   private rateLimitedUntil = 0;
 
+  private getScopeKey(): string | null {
+    if (this.chatId === null) {
+      return null;
+    }
+
+    return `${this.chatId}:${this.threadId ?? "private"}`;
+  }
+
   /**
    * Initialize manager with bot API and chat ID
    */
-  initialize(api: Api, chatId: number): void {
+  initialize(api: Api, chatId: number, threadId: number | null = null): void {
     this.api = api;
     this.chatId = chatId;
+    this.threadId = threadId;
+    this.state.chatId = chatId;
+    this.state.threadId = threadId;
 
     // Restore pinned message ID from settings
-    const savedMessageId = getPinnedMessageId();
+    const scopeKey = this.getScopeKey();
+    const savedMessageId = scopeKey ? getScopedPinnedMessageId(scopeKey) : getPinnedMessageId();
     if (savedMessageId) {
       this.state.messageId = savedMessageId;
       this.state.chatId = chatId;
+      this.state.threadId = threadId;
     }
   }
 
   /**
    * Called when session changes - create new pinned message
    */
-  async onSessionChange(sessionId: string, sessionTitle: string): Promise<void> {
+  async onSessionChange(
+    sessionId: string,
+    sessionTitle: string,
+    directory?: string,
+  ): Promise<void> {
     logger.info(`[PinnedManager] Session changed: ${sessionId}, title: ${sessionTitle}`);
 
     // Reset tokens for new session
@@ -62,11 +84,10 @@ class PinnedMessageManager {
 
     // Update state
     this.state.sessionId = sessionId;
+    this.state.directory = directory ?? this.state.directory ?? null;
     this.state.sessionTitle = sessionTitle || t("pinned.default_session_title");
-
-    const project = getCurrentProject();
     this.state.projectName =
-      project?.name || this.extractProjectName(project?.worktree) || t("pinned.unknown");
+      this.extractProjectName(this.state.directory ?? undefined) || t("pinned.unknown");
 
     // Fetch context limit for current model
     await this.fetchContextLimit();
@@ -267,14 +288,19 @@ class PinnedMessageManager {
     this.scheduleDebouncedUpdate();
   }
 
-  private scheduleDebouncedUpdate(delayMs: number = PinnedMessageManager.DEFAULT_UPDATE_DEBOUNCE_MS): void {
+  private scheduleDebouncedUpdate(
+    delayMs: number = PinnedMessageManager.DEFAULT_UPDATE_DEBOUNCE_MS,
+  ): void {
     if (this.updateDebounceTimer) {
       clearTimeout(this.updateDebounceTimer);
     }
-    this.updateDebounceTimer = setTimeout(() => {
-      this.updateDebounceTimer = null;
-      void this.flushScheduledUpdate();
-    }, Math.max(0, delayMs));
+    this.updateDebounceTimer = setTimeout(
+      () => {
+        this.updateDebounceTimer = null;
+        void this.flushScheduledUpdate();
+      },
+      Math.max(0, delayMs),
+    );
   }
 
   private async flushScheduledUpdate(): Promise<void> {
@@ -338,8 +364,8 @@ class PinnedMessageManager {
    */
   private async loadDiffsFromApi(sessionId: string): Promise<void> {
     try {
-      const project = getCurrentProject();
-      if (!project) {
+      const directory = this.state.directory;
+      if (!directory) {
         logger.debug("[PinnedManager] loadDiffsFromApi: no project");
         return;
       }
@@ -349,7 +375,7 @@ class PinnedMessageManager {
       // Try session.diff() API first
       const { data, error } = await opencodeClient.session.diff({
         sessionID: sessionId,
-        directory: project.worktree,
+        directory,
       });
 
       logger.debug(
@@ -371,7 +397,7 @@ class PinnedMessageManager {
 
       // Fallback: parse tool parts from session messages
       logger.debug("[PinnedManager] session.diff() empty, trying loadDiffsFromMessages()");
-      await this.loadDiffsFromMessages(sessionId, project.worktree);
+      await this.loadDiffsFromMessages(sessionId, directory);
     } catch (err) {
       logger.debug("[PinnedManager] Could not load diffs from API:", err);
     }
@@ -493,17 +519,17 @@ class PinnedMessageManager {
    * Refresh session title from API
    */
   private async refreshSessionTitle(): Promise<void> {
-    const session = getCurrentSession();
-    const project = getCurrentProject();
+    const sessionId = this.state.sessionId;
+    const directory = this.state.directory;
 
-    if (!session || !project) {
+    if (!sessionId || !directory) {
       return;
     }
 
     try {
       const { data: sessionData } = await opencodeClient.session.get({
-        sessionID: session.id,
-        directory: project.worktree,
+        sessionID: sessionId,
+        directory,
       });
 
       if (sessionData && sessionData.title !== this.state.sessionTitle) {
@@ -530,10 +556,10 @@ class PinnedMessageManager {
    */
   private makeRelativePath(filePath: string): string {
     const normalized = filePath.replace(/\\/g, "/");
-    const project = getCurrentProject();
+    const directory = this.state.directory;
 
-    if (project?.worktree) {
-      const worktree = project.worktree.replace(/\\/g, "/");
+    if (directory) {
+      const worktree = directory.replace(/\\/g, "/");
       if (normalized.startsWith(worktree)) {
         // Remove worktree prefix and leading slash
         let relative = normalized.slice(worktree.length);
@@ -555,7 +581,7 @@ class PinnedMessageManager {
    */
   private async fetchContextLimit(): Promise<void> {
     try {
-      const model = getStoredModel();
+      const model = getStoredModel(this.threadId, this.chatId);
       if (!model.providerID || !model.modelID) {
         logger.warn("[PinnedManager] No model configured, using default limit");
         this.contextLimit = 200000;
@@ -608,7 +634,7 @@ class PinnedMessageManager {
     const limitFormatted = this.formatTokenCount(this.state.tokensLimit);
 
     // Get current model info
-    const currentModel = getStoredModel();
+    const currentModel = getStoredModel(this.threadId, this.chatId);
     const modelName =
       currentModel.providerID && currentModel.modelID
         ? `${currentModel.providerID}/${currentModel.modelID}`
@@ -675,13 +701,19 @@ class PinnedMessageManager {
       const text = this.formatMessage();
 
       // Send new message
-      const sentMessage = await this.api.sendMessage(this.chatId, text);
+      const sentMessage = await this.api.sendMessage(this.chatId, text, {
+        message_thread_id: this.threadId ?? undefined,
+      });
 
       this.state.messageId = sentMessage.message_id;
       this.state.chatId = this.chatId;
       this.state.lastUpdated = Date.now();
 
       // Save to settings for persistence
+      const scopeKey = this.getScopeKey();
+      if (scopeKey) {
+        setScopedPinnedMessageId(scopeKey, sentMessage.message_id);
+      }
       setPinnedMessageId(sentMessage.message_id);
 
       // Pin the message (silently)
@@ -739,6 +771,10 @@ class PinnedMessageManager {
       if (err instanceof Error && err.message.includes("message to edit not found")) {
         logger.warn("[PinnedManager] Pinned message was deleted, recreating...");
         this.state.messageId = null;
+        const scopeKey = this.getScopeKey();
+        if (scopeKey) {
+          clearScopedPinnedMessageId(scopeKey);
+        }
         clearPinnedMessageId();
         await this.createPinnedMessage();
         return;
@@ -758,9 +794,15 @@ class PinnedMessageManager {
 
     try {
       // Unpin all messages (ensures clean state)
-      await this.api.unpinAllChatMessages(this.chatId).catch(() => {});
+      if (this.state.messageId) {
+        await this.api.unpinChatMessage(this.chatId, this.state.messageId).catch(() => {});
+      }
 
       this.state.messageId = null;
+      const scopeKey = this.getScopeKey();
+      if (scopeKey) {
+        clearScopedPinnedMessageId(scopeKey);
+      }
       clearPinnedMessageId();
 
       logger.debug("[PinnedManager] Unpinned old messages");
@@ -790,10 +832,16 @@ class PinnedMessageManager {
     if (!this.api || !this.chatId) {
       // Just reset state if not initialized
       this.state.messageId = null;
+      this.state.threadId = null;
       this.state.sessionId = null;
+      this.state.directory = null;
       this.state.tokensUsed = 0;
       this.state.tokensLimit = 0;
       this.state.changedFiles = [];
+      const scopeKey = this.getScopeKey();
+      if (scopeKey) {
+        clearScopedPinnedMessageId(scopeKey);
+      }
       clearPinnedMessageId();
 
       if (this.updateDebounceTimer) {
@@ -809,16 +857,23 @@ class PinnedMessageManager {
 
     try {
       // Unpin all messages
-      await this.api.unpinAllChatMessages(this.chatId).catch(() => {});
+      if (this.state.messageId) {
+        await this.api.unpinChatMessage(this.chatId, this.state.messageId).catch(() => {});
+      }
 
       // Reset state
       this.state.messageId = null;
       this.state.sessionId = null;
+      this.state.directory = null;
       this.state.sessionTitle = t("pinned.default_session_title");
       this.state.projectName = "";
       this.state.tokensUsed = 0;
       this.state.tokensLimit = 0;
       this.state.changedFiles = [];
+      const scopeKey = this.getScopeKey();
+      if (scopeKey) {
+        clearScopedPinnedMessageId(scopeKey);
+      }
       clearPinnedMessageId();
 
       if (this.updateDebounceTimer) {

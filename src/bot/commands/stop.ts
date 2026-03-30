@@ -1,11 +1,11 @@
 import { CommandContext, Context } from "grammy";
 import { opencodeClient } from "../../opencode/client.js";
 import { stopEventListening } from "../../opencode/events.js";
-import { getCurrentSession } from "../../session/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
+import { getCurrentSessionByThread } from "../handlers/prompt.js";
 
 type SessionState = "idle" | "busy" | "not-found";
 
@@ -60,7 +60,8 @@ export async function stopCommand(ctx: CommandContext<Context>) {
   try {
     stopLocalStreaming();
 
-    const currentSession = getCurrentSession();
+    const threadId = ctx.message?.message_thread_id ?? null;
+    const currentSession = getCurrentSessionByThread(threadId, ctx.chat?.id ?? null);
 
     if (!currentSession) {
       await ctx.reply(t("stop.no_active_session"));

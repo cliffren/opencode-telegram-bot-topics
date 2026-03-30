@@ -37,6 +37,7 @@ import {
 import { processExternalSendFileRequests } from "./external/sendfile-requests.js";
 import { processBgPostActionRequests } from "../bg/post-action-requests.js";
 import { processBgDispatchRequests } from "../bg/dispatch-requests.js";
+import { getInteractionScopeKeyFromContext } from "../interaction/scope.js";
 import {
   handleQuestionCallback,
   showCurrentQuestion,
@@ -521,27 +522,27 @@ function prepareDocumentCaption(caption: string): string {
 const toolMessageBatcher = new ToolMessageBatcher({
   intervalSeconds: 5,
   sendText: async (sessionId, text) => {
-    if (!botInstance || !chatIdInstance) {
+    if (!botInstance) {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    const routeContext = getSessionRouteContext(sessionId);
+    if (!routeContext) {
       return;
     }
 
-    await botInstance.api.sendMessage(chatIdInstance, text, {
+    await botInstance.api.sendMessage(routeContext.chatId, text, {
       disable_notification: true,
-      message_thread_id: threadIdInstance ?? undefined,
+      message_thread_id: routeContext.threadId ?? undefined,
     });
   },
   sendFile: async (sessionId, fileData) => {
-    if (!botInstance || !chatIdInstance) {
+    if (!botInstance) {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    const routeContext = getSessionRouteContext(sessionId);
+    if (!routeContext) {
       return;
     }
 
@@ -555,10 +556,10 @@ const toolMessageBatcher = new ToolMessageBatcher({
       await fs.mkdir(TEMP_DIR, { recursive: true });
       await fs.writeFile(tempFilePath, fileData.buffer);
 
-      await botInstance.api.sendDocument(chatIdInstance, new InputFile(tempFilePath), {
+      await botInstance.api.sendDocument(routeContext.chatId, new InputFile(tempFilePath), {
         caption: fileData.caption,
         disable_notification: true,
-        message_thread_id: threadIdInstance ?? undefined,
+        message_thread_id: routeContext.threadId ?? undefined,
       });
     } finally {
       await fs.unlink(tempFilePath).catch(() => {});
@@ -606,7 +607,7 @@ function clearSessionStatusTracking(sessionId: string): void {
 
 function clearSessionCompletionGuardByContext(ctx: Context): void {
   const threadId = getThreadId(ctx);
-  const session = getCurrentSessionByThread(threadId, ctx.chat?.id ?? null) ?? getCurrentSession();
+  const session = getCurrentSessionByThread(threadId, ctx.chat?.id ?? null);
   if (!session) {
     return;
   }
@@ -1061,7 +1062,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
         return;
       }
 
-      const message = formatToolInfo(toolInfo);
+      const message = formatToolInfo(toolInfo, routeContext.directory);
       if (message) {
         stopThinkingAnimation(toolInfo.sessionId);
         const preview = toSingleLineStatusPreview(message);
@@ -1090,7 +1091,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
     }
 
     try {
-      const toolMessage = formatToolInfo(fileInfo);
+      const toolMessage = formatToolInfo(fileInfo, routeContext.directory);
       const caption = prepareDocumentCaption(toolMessage || fileInfo.fileData.caption);
 
       toolMessageBatcher.enqueueFile(fileInfo.sessionId, {
@@ -1102,38 +1103,38 @@ async function ensureEventSubscription(directory: string): Promise<void> {
     }
   });
 
-  summaryAggregator.setOnQuestion(async (questions, requestID) => {
+  summaryAggregator.setOnQuestion(async (sessionId, questions, requestID) => {
     if (!botInstance) {
       logger.error("Bot or chat ID not available for showing questions");
       return;
     }
 
-    const activeSession = getCurrentSession();
-    if (activeSession) {
-      await toolMessageBatcher.flushSession(activeSession.id, "question_asked");
-    }
+    await toolMessageBatcher.flushSession(sessionId, "question_asked");
 
-    const inferredSessionId = activeSession?.id;
-    const routeContext = inferredSessionId ? getSessionRouteContext(inferredSessionId) : null;
-    const targetChatId = routeContext?.chatId ?? chatIdInstance;
-    if (!targetChatId) {
+    const routeContext = getSessionRouteContext(sessionId);
+    if (!routeContext) {
       return;
     }
+    const scopeKey = `${routeContext.chatId}:${routeContext.threadId ?? "private"}`;
 
-    if (questionManager.isActive()) {
+    if (questionManager.isActive(scopeKey)) {
       logger.warn("[Bot] Replacing active poll with a new one");
 
-      const previousMessageIds = questionManager.getMessageIds();
+      const previousMessageIds = questionManager.getMessageIds(scopeKey);
       for (const messageId of previousMessageIds) {
-        await botInstance.api.deleteMessage(targetChatId, messageId).catch(() => {});
+        await botInstance.api.deleteMessage(routeContext.chatId, messageId).catch(() => {});
       }
 
       clearAllInteractionState("question_replaced_by_new_poll");
     }
 
     logger.info(`[Bot] Received ${questions.length} questions from agent, requestID=${requestID}`);
-    questionManager.startQuestions(questions, requestID);
-    await showCurrentQuestion(botInstance.api, targetChatId);
+    questionManager.startQuestions(questions, requestID, {
+      sessionId,
+      chatId: routeContext.chatId,
+      threadId: routeContext.threadId,
+    });
+    await showCurrentQuestion(botInstance.api, routeContext.chatId, scopeKey);
   });
 
   summaryAggregator.setOnQuestionError(async () => {
@@ -1141,9 +1142,10 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 
     // Delete all messages from the invalid poll
     const messageIds = questionManager.getMessageIds();
+    const questionRoute = questionManager.getRouteContext();
     for (const messageId of messageIds) {
-      if (chatIdInstance) {
-        await botInstance?.api.deleteMessage(chatIdInstance, messageId).catch((err) => {
+      if (questionRoute.chatId) {
+        await botInstance?.api.deleteMessage(questionRoute.chatId, messageId).catch((err) => {
           logger.error(`[Bot] Failed to delete question message ${messageId}:`, err);
         });
       }
@@ -1164,12 +1166,16 @@ async function ensureEventSubscription(directory: string): Promise<void> {
       `[Bot] Received permission request from agent: type=${request.permission}, requestID=${request.id}`,
     );
     const routeContext = getSessionRouteContext(request.sessionID);
-    const targetChatId = routeContext?.chatId ?? chatIdInstance;
-    if (!targetChatId) {
+    if (!routeContext) {
       return;
     }
 
-    await showPermissionRequest(botInstance.api, targetChatId, request);
+    await showPermissionRequest(
+      botInstance.api,
+      routeContext.chatId,
+      request,
+      routeContext.threadId,
+    );
   });
 
   summaryAggregator.setOnThinking(async (sessionId) => {
@@ -1219,19 +1225,23 @@ async function ensureEventSubscription(directory: string): Promise<void> {
 
     try {
       logger.info(`[Bot] Session compacted, reloading context: ${sessionId}`);
-      await pinnedMessageManager.onSessionCompacted(sessionId, directory);
+      const routeContext = getSessionRouteContext(sessionId);
+      await pinnedMessageManager.onSessionCompacted(
+        sessionId,
+        routeContext?.directory ?? directory,
+      );
     } catch (err) {
       logger.error("[Bot] Error reloading context after compaction:", err);
     }
   });
 
   summaryAggregator.setOnSessionError(async (sessionId, message) => {
-    if (!botInstance || !chatIdInstance) {
+    if (!botInstance) {
       return;
     }
 
-    const currentSession = getCurrentSession();
-    if (!currentSession || currentSession.id !== sessionId) {
+    const routeContext = getSessionRouteContext(sessionId);
+    if (!routeContext) {
       return;
     }
 
@@ -1245,8 +1255,8 @@ async function ensureEventSubscription(directory: string): Promise<void> {
         : normalizedMessage;
 
     await botInstance.api
-      .sendMessage(chatIdInstance, t("bot.session_error", { message: truncatedMessage }), {
-        message_thread_id: threadIdInstance ?? undefined,
+      .sendMessage(routeContext.chatId, t("bot.session_error", { message: truncatedMessage }), {
+        message_thread_id: routeContext.threadId ?? undefined,
       })
       .catch((err) => {
         logger.error("[Bot] Failed to send session.error message:", err);
@@ -1497,7 +1507,9 @@ export function createBot(): Bot<Context> {
   bot.use(interactionGuardMiddleware);
 
   const blockMenuWhileInteractionActive = async (ctx: Context): Promise<boolean> => {
-    const activeInteraction = interactionManager.getSnapshot();
+    const activeInteraction = interactionManager.getSnapshot(
+      getInteractionScopeKeyFromContext(ctx),
+    );
     if (!activeInteraction) {
       return false;
     }

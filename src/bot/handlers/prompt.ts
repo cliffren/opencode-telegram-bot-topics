@@ -10,6 +10,7 @@ import {
 } from "../../settings/manager.js";
 import { getStoredAgent } from "../../agent/manager.js";
 import { getStoredModel } from "../../model/manager.js";
+import { getCurrentProjectForScope } from "../../project/scope.js";
 import { formatVariantForButton } from "../../variant/manager.js";
 import { createMainKeyboard } from "../utils/keyboard.js";
 import { keyboardManager } from "../../keyboard/manager.js";
@@ -19,6 +20,7 @@ import { stopEventListening } from "../../opencode/events.js";
 import { config } from "../../config.js";
 import { interactionManager } from "../../interaction/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
+import { getInteractionScopeKeyFromContext } from "../../interaction/scope.js";
 import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { formatErrorDetails } from "../../utils/error-format.js";
 import { logger } from "../../utils/logger.js";
@@ -59,7 +61,10 @@ export function setCurrentSessionByThread(threadId: number | null, chatId: numbe
   setScopedSession(scopeKey, currentSession);
 }
 
-export function getCurrentSessionByThread(threadId: number | null, chatId: number | null): { id: string; title: string; directory: string } | null {
+export function getCurrentSessionByThread(
+  threadId: number | null,
+  chatId: number | null,
+): { id: string; title: string; directory: string } | null {
   const scopeKey = getSessionScopeKey(chatId, threadId);
   const inMemory = scopedSessionMap.get(scopeKey);
   if (inMemory) {
@@ -153,15 +158,18 @@ async function isSessionKnown(sessionId: string, directory: string): Promise<boo
   }
 }
 
-async function resetMismatchedSessionContext(threadId: number | null, chatId: number | null): Promise<void> {
+async function resetMismatchedSessionContext(
+  threadId: number | null,
+  chatId: number | null,
+): Promise<void> {
   stopEventListening();
   summaryAggregator.clear();
   clearAllInteractionState("session_mismatch_reset");
   clearSession();
-  
+
   // Clear thread session for Topic isolation
   clearSessionByThread(threadId, chatId);
-  
+
   keyboardManager.clearContext();
 
   if (!pinnedMessageManager.isInitialized()) {
@@ -191,7 +199,8 @@ type PromptPartInput = { type: "text"; text: string } | PromptFilePartInput;
 
 function isSendFileIntent(text: string): boolean {
   const normalized = text.toLowerCase();
-  const zhFileTerms = "文件|文档|图片|照片|截图|图|pdf|ppt|pptx|slides|幻灯片|excel|表格|word|txt|文本";
+  const zhFileTerms =
+    "文件|文档|图片|照片|截图|图|pdf|ppt|pptx|slides|幻灯片|excel|表格|word|txt|文本";
   return (
     /(send|share|deliver).*(file|document|image|photo|screenshot|pic|pdf|ppt|pptx|slides|excel|spreadsheet|table|word|txt|artifacts?).*(telegram|chat|me)/i.test(
       normalized,
@@ -206,7 +215,9 @@ function isSendFileIntent(text: string): boolean {
       normalized,
     ) ||
     new RegExp(`(发送|发|传).*(${zhFileTerms}).*(给我|到telegram|到群|到聊天)`).test(text) ||
-    new RegExp(`(把|将).*(${zhFileTerms}).*(发送|发|传).*(给我|到telegram|到群|到聊天)`).test(text) ||
+    new RegExp(`(把|将).*(${zhFileTerms}).*(发送|发|传).*(给我|到telegram|到群|到聊天)`).test(
+      text,
+    ) ||
     new RegExp(`(发给我|传给我).*(${zhFileTerms}|artifact|artifacts)`, "i").test(text) ||
     new RegExp(`(${zhFileTerms}|artifact|artifacts).*(发给我|传给我)`, "i").test(text) ||
     /(отправь|скинь|пришли|передай).*(файл|документ|картинк|изображени|скриншот).*(мне|в\s*telegram|в\s*чат)/i.test(
@@ -230,7 +241,9 @@ function isSendFileIntent(text: string): boolean {
 function isSendFileConfirmation(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   return (
-    /^(发吧|发送吧|发过去|传吧|就发这个|发一下|发下|现在发|可以发了|执行吧|继续)$/i.test(text.trim()) ||
+    /^(发吧|发送吧|发过去|传吧|就发这个|发一下|发下|现在发|可以发了|执行吧|继续)$/i.test(
+      text.trim(),
+    ) ||
     /^(send it|send now|go ahead|do it|proceed|execute)$/i.test(normalized) ||
     /^(отправь|скинь|давай|выполняй|выполни|продолжай|ок\b|поехали)$/i.test(normalized)
   );
@@ -260,7 +273,7 @@ function getSendFileInstructionByPlatform(): string {
   if (process.platform === "win32") {
     const pathPatchCommand = configuredBinDir
       ? `$env:Path = \"${configuredBinDir};$env:Path\"`
-      : "$env:Path = \"$env:APPDATA\\npm;$env:Path\"";
+      : '$env:Path = "$env:APPDATA\\npm;$env:Path"';
     const runtimePatchParts: string[] = [];
     if (runtimeMode) {
       runtimePatchParts.push(`$env:OPENCODE_TELEGRAM_RUNTIME_MODE = \"${runtimeMode}\"`);
@@ -329,7 +342,8 @@ function maybeAugmentPromptForSendFileIntent(
     return { promptText: text, injected: false };
   }
 
-  const effectiveUserRequest = confirmationIntent && pendingIntent ? pendingIntent.sourceText : text;
+  const effectiveUserRequest =
+    confirmationIntent && pendingIntent ? pendingIntent.sourceText : text;
   if (confirmationIntent) {
     pendingSendFileIntentByScope.delete(scopeKey);
   }
@@ -355,7 +369,8 @@ export async function processUserPrompt(
 ): Promise<boolean> {
   const { bot, ensureEventSubscription } = deps;
 
-  const currentProject = getCurrentProject();
+  const currentThreadId = getThreadId(ctx);
+  const currentProject = getCurrentProjectForScope(currentThreadId, ctx.chat?.id ?? null);
   if (!currentProject) {
     await ctx.reply(t("bot.project_not_selected"));
     return false;
@@ -366,7 +381,6 @@ export async function processUserPrompt(
   threadIdInstance = getThreadId(ctx);
 
   // For Topic isolation, get session by threadId
-  const currentThreadId = getThreadId(ctx);
   let currentSession = getCurrentSessionByThread(currentThreadId, ctx.chat?.id ?? null);
   logger.info(
     `[Prompt] Thread routing: threadId=${currentThreadId ?? "none"}, session=${currentSession?.id ?? "none"}`,
@@ -399,7 +413,7 @@ export async function processUserPrompt(
     const sessionCreateOptions: { directory: string; title?: string } = {
       directory: currentProject.worktree,
     };
-    
+
     // Add Topic ID to session title for isolation
     if (currentThreadId) {
       sessionCreateOptions.title = `Topic ${currentThreadId}`;
@@ -423,18 +437,26 @@ export async function processUserPrompt(
     };
 
     setCurrentSession(currentSession);
-    
+
     // Store session for Topic/private isolation and persist mapping
     setCurrentSessionByThread(currentThreadId, ctx.chat?.id ?? null);
-    
+
     await ingestSessionInfoForCache(session);
 
     // Create pinned message for new session
     try {
-      if (!pinnedMessageManager.isInitialized() || pinnedMessageManager.getState().chatId !== ctx.chat!.id) {
-        pinnedMessageManager.initialize(ctx.api, ctx.chat!.id);
+      if (
+        !pinnedMessageManager.isInitialized() ||
+        pinnedMessageManager.getState().chatId !== ctx.chat!.id ||
+        pinnedMessageManager.getState().threadId !== currentThreadId
+      ) {
+        pinnedMessageManager.initialize(ctx.api, ctx.chat!.id, currentThreadId);
       }
-      await pinnedMessageManager.onSessionChange(session.id, session.title);
+      await pinnedMessageManager.onSessionChange(
+        session.id,
+        session.title,
+        currentProject.worktree,
+      );
     } catch (err) {
       logger.error("[Bot] Error creating pinned message for new session:", err);
     }
@@ -459,12 +481,24 @@ export async function processUserPrompt(
     );
 
     // Ensure pinned message exists for existing session
-    if (!pinnedMessageManager.getState().messageId || pinnedMessageManager.getState().chatId !== ctx.chat!.id) {
+    if (
+      !pinnedMessageManager.getState().messageId ||
+      pinnedMessageManager.getState().chatId !== ctx.chat!.id ||
+      pinnedMessageManager.getState().threadId !== currentThreadId
+    ) {
       try {
-        if (!pinnedMessageManager.isInitialized() || pinnedMessageManager.getState().chatId !== ctx.chat!.id) {
-          pinnedMessageManager.initialize(ctx.api, ctx.chat!.id);
+        if (
+          !pinnedMessageManager.isInitialized() ||
+          pinnedMessageManager.getState().chatId !== ctx.chat!.id ||
+          pinnedMessageManager.getState().threadId !== currentThreadId
+        ) {
+          pinnedMessageManager.initialize(ctx.api, ctx.chat!.id, currentThreadId);
         }
-        await pinnedMessageManager.onSessionChange(currentSession.id, currentSession.title);
+        await pinnedMessageManager.onSessionChange(
+          currentSession.id,
+          currentSession.title,
+          currentProject.worktree,
+        );
       } catch (err) {
         logger.error("[Bot] Error creating pinned message for existing session:", err);
       }
@@ -556,7 +590,11 @@ export async function processUserPrompt(
           logger.error("[Bot] session.prompt raw API error object:", error);
 
           // Send user-friendly error via API directly because ctx is no longer available
-          void bot.api.sendMessage(ctx.chat!.id, t("bot.prompt_send_error")).catch(() => {});
+          void bot.api
+            .sendMessage(ctx.chat!.id, t("bot.prompt_send_error"), {
+              message_thread_id: currentThreadId ?? undefined,
+            })
+            .catch(() => {});
           return;
         }
 
@@ -567,14 +605,18 @@ export async function processUserPrompt(
         logger.error("[Bot] session.prompt background task failed", promptErrorLogContext);
         logger.error("[Bot] session.prompt background failure details:", details);
         logger.error("[Bot] session.prompt raw background error object:", error);
-        void bot.api.sendMessage(ctx.chat!.id, t("bot.prompt_send_error")).catch(() => {});
+        void bot.api
+          .sendMessage(ctx.chat!.id, t("bot.prompt_send_error"), {
+            message_thread_id: currentThreadId ?? undefined,
+          })
+          .catch(() => {});
       },
     });
 
     return true;
   } catch (err) {
     logger.error("Error in prompt handler:", err);
-    if (interactionManager.getSnapshot()) {
+    if (interactionManager.getSnapshot(getInteractionScopeKeyFromContext(ctx))) {
       clearAllInteractionState("message_handler_error");
     }
     await ctx.reply(t("error.generic"));

@@ -1,5 +1,9 @@
 import { Context, InlineKeyboard } from "grammy";
 import { interactionManager } from "../../interaction/manager.js";
+import {
+  getInteractionScopeKey,
+  getInteractionScopeKeyFromContext,
+} from "../../interaction/scope.js";
 import type { InteractionState } from "../../interaction/types.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
@@ -7,7 +11,15 @@ import { t } from "../../i18n/index.js";
 const INLINE_MENU_CANCEL_PREFIX = "inline:cancel:";
 const LEGACY_CONTEXT_CANCEL_CALLBACK = "compact:cancel";
 
-const INLINE_MENU_KINDS = ["project", "session", "delete_session", "model", "agent", "variant", "context"] as const;
+const INLINE_MENU_KINDS = [
+  "project",
+  "session",
+  "delete_session",
+  "model",
+  "agent",
+  "variant",
+  "context",
+] as const;
 
 export type InlineMenuKind = (typeof INLINE_MENU_KINDS)[number];
 
@@ -53,7 +65,7 @@ function getCallbackThreadId(ctx: Context): number | null {
 }
 
 export function resolveInlineInteractionScope(ctx: Context): InlineInteractionScope {
-  const state = interactionManager.getSnapshot();
+  const state = interactionManager.getSnapshot(getInteractionScopeKeyFromContext(ctx));
   const metadata = state?.kind === "inline" ? state.metadata : null;
 
   const messageThreadId = ctx.message?.message_thread_id ?? null;
@@ -70,10 +82,7 @@ export function resolveInlineInteractionScope(ctx: Context): InlineInteractionSc
       chatId = metadataChatId;
     }
 
-    if (
-      threadId === null &&
-      (typeof metadataThreadId === "number" || metadataThreadId === null)
-    ) {
+    if (threadId === null && (typeof metadataThreadId === "number" || metadataThreadId === null)) {
       threadId = metadataThreadId;
     }
   }
@@ -151,16 +160,19 @@ export async function replyWithInlineMenu(
 
   const scope = resolveInlineInteractionScope(ctx);
 
-  interactionManager.start({
-    kind: "inline",
-    expectedInput: "callback",
-    metadata: {
-      menuKind: options.menuKind,
-      messageId: message.message_id,
-      interactionChatId: scope.chatId,
-      interactionThreadId: scope.threadId,
+  interactionManager.start(
+    {
+      kind: "inline",
+      expectedInput: "callback",
+      metadata: {
+        menuKind: options.menuKind,
+        messageId: message.message_id,
+        interactionChatId: scope.chatId,
+        interactionThreadId: scope.threadId,
+      },
     },
-  });
+    getInteractionScopeKey(scope.chatId, scope.threadId),
+  );
 
   logger.debug(
     `[InlineMenu] Opened menu: kind=${options.menuKind}, messageId=${message.message_id}`,
@@ -173,7 +185,9 @@ export async function ensureActiveInlineMenu(
   ctx: Context,
   menuKind: InlineMenuKind,
 ): Promise<boolean> {
-  const activeMetadata = getActiveInlineMenuMetadata(interactionManager.getSnapshot());
+  const activeMetadata = getActiveInlineMenuMetadata(
+    interactionManager.getSnapshot(getInteractionScopeKeyFromContext(ctx)),
+  );
   const callbackMessageId = getCallbackMessageId(ctx);
 
   const isActive =
@@ -197,10 +211,11 @@ export async function ensureActiveInlineMenu(
   return false;
 }
 
-export function clearActiveInlineMenu(reason: string): void {
-  const state = interactionManager.getSnapshot();
+export function clearActiveInlineMenu(reason: string, ctx?: Context): void {
+  const scopeKey = ctx ? getInteractionScopeKeyFromContext(ctx) : undefined;
+  const state = interactionManager.getSnapshot(scopeKey);
   if (state?.kind === "inline") {
-    interactionManager.clear(reason);
+    interactionManager.clear(reason, scopeKey);
   }
 }
 
@@ -230,7 +245,7 @@ export async function handleInlineMenuCancel(ctx: Context): Promise<boolean> {
     return true;
   }
 
-  clearActiveInlineMenu(`inline_menu_cancel:${menuKind}`);
+  clearActiveInlineMenu(`inline_menu_cancel:${menuKind}`, ctx);
 
   await ctx.answerCallbackQuery({ text: t("inline.cancelled_callback") }).catch(() => {});
   await ctx.deleteMessage().catch(() => {});

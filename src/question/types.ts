@@ -25,4 +25,7 @@ export interface QuestionState {
   messageIds: number[];
   isActive: boolean;
   requestID: string | null;
+  sessionId: string | null;
+  chatId: number | null;
+  threadId: number | null;
 }

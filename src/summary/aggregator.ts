@@ -6,7 +6,6 @@ import type { Question } from "../question/types.js";
 import type { PermissionRequest } from "../permission/types.js";
 import type { FileChange } from "../pinned/types.js";
 import { logger } from "../utils/logger.js";
-import { getCurrentProject } from "../settings/manager.js";
 import { config } from "../config.js";
 
 export interface SummaryInfo {
@@ -39,7 +38,7 @@ type ToolCallback = (toolInfo: ToolInfo) => void;
 
 type ToolFileCallback = (fileInfo: ToolFileInfo) => void;
 
-type QuestionCallback = (questions: Question[], requestID: string) => void;
+type QuestionCallback = (sessionId: string, questions: Question[], requestID: string) => void;
 
 type QuestionErrorCallback = () => void;
 
@@ -739,10 +738,7 @@ class SummaryAggregator {
     // Reload context from history after compaction
     if (this.onSessionCompactedCallback) {
       setImmediate(() => {
-        const project = getCurrentProject();
-        if (project) {
-          this.onSessionCompactedCallback!(sessionID, project.worktree);
-        }
+        this.onSessionCompactedCallback!(sessionID, "");
       });
     }
   }
@@ -797,7 +793,7 @@ class SummaryAggregator {
       const callback = this.onQuestionCallback;
       setImmediate(async () => {
         try {
-          await callback(questions as Question[], id);
+          await callback(sessionID, questions as Question[], id);
         } catch (err) {
           logger.error("[Aggregator] Error in question callback:", err);
         }

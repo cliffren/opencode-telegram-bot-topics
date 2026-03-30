@@ -4,8 +4,7 @@ import * as path from "path";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { config } from "../../config.js";
-import { getPromptThreadId } from "../handlers/prompt.js";
-import { getCurrentSession } from "../../session/manager.js";
+import { getCurrentSessionByThread, getPromptThreadId } from "../handlers/prompt.js";
 
 const FUZZY_SEARCH_MAX_FILES = 20000;
 const FUZZY_SEARCH_MAX_MATCHES = 30;
@@ -27,7 +26,7 @@ function resolveThreadIdFromContext(ctx: Context): number | null {
   return getPromptThreadId();
 }
 
-function resolveCandidatePaths(filePath: string): string[] {
+function resolveCandidatePaths(filePath: string, currentDirectory?: string | null): string[] {
   const trimmedPath = filePath.trim();
   if (!trimmedPath) {
     return [];
@@ -38,10 +37,8 @@ function resolveCandidatePaths(filePath: string): string[] {
   }
 
   const candidates = new Set<string>();
-  const currentSession = getCurrentSession();
-
-  if (currentSession?.directory) {
-    candidates.add(path.resolve(currentSession.directory, trimmedPath));
+  if (currentDirectory) {
+    candidates.add(path.resolve(currentDirectory, trimmedPath));
   }
 
   candidates.add(path.resolve(process.cwd(), trimmedPath));
@@ -84,7 +81,11 @@ async function fuzzyFindFileCandidates(searchRoots: string[], query: string): Pr
   for (const root of roots) {
     const stack: string[] = [root];
 
-    while (stack.length > 0 && scannedFiles < FUZZY_SEARCH_MAX_FILES && matches.length < FUZZY_SEARCH_MAX_MATCHES) {
+    while (
+      stack.length > 0 &&
+      scannedFiles < FUZZY_SEARCH_MAX_FILES &&
+      matches.length < FUZZY_SEARCH_MAX_MATCHES
+    ) {
       const currentDir = stack.pop();
       if (!currentDir) {
         continue;
@@ -133,8 +134,11 @@ async function fuzzyFindFileCandidates(searchRoots: string[], query: string): Pr
   return Array.from(new Set(matches.map((item) => item.file)));
 }
 
-export async function findFileCandidatesForRequest(filePath: string): Promise<string[]> {
-  const candidatePaths = resolveCandidatePaths(filePath);
+export async function findFileCandidatesForRequest(
+  filePath: string,
+  currentDirectory?: string | null,
+): Promise<string[]> {
+  const candidatePaths = resolveCandidatePaths(filePath, currentDirectory);
   const exactFileMatches: string[] = [];
 
   for (const candidatePath of candidatePaths) {
@@ -153,14 +157,21 @@ export async function findFileCandidatesForRequest(filePath: string): Promise<st
   }
 
   const rootsForFuzzySearch = Array.from(
-    new Set([getCurrentSession()?.directory, process.cwd()].filter((value): value is string => Boolean(value && value.trim()))),
+    new Set(
+      [currentDirectory, process.cwd()].filter((value): value is string =>
+        Boolean(value && value.trim()),
+      ),
+    ),
   );
 
   return fuzzyFindFileCandidates(rootsForFuzzySearch, filePath);
 }
 
-async function resolveFileForSending(filePath: string): Promise<{ absolutePath: string; stats: Awaited<ReturnType<typeof fs.stat>> } | null> {
-  const candidatePaths = resolveCandidatePaths(filePath);
+async function resolveFileForSending(
+  filePath: string,
+  currentDirectory?: string | null,
+): Promise<{ absolutePath: string; stats: Awaited<ReturnType<typeof fs.stat>> } | null> {
+  const candidatePaths = resolveCandidatePaths(filePath, currentDirectory);
   if (candidatePaths.length === 0) {
     return null;
   }
@@ -174,7 +185,7 @@ async function resolveFileForSending(filePath: string): Promise<{ absolutePath: 
     }
   }
 
-  const fuzzyMatches = await findFileCandidatesForRequest(filePath);
+  const fuzzyMatches = await findFileCandidatesForRequest(filePath, currentDirectory);
   if (fuzzyMatches.length > 0) {
     const absolutePath = fuzzyMatches[0];
     const stats = await fs.stat(absolutePath);
@@ -182,7 +193,9 @@ async function resolveFileForSending(filePath: string): Promise<{ absolutePath: 
     return { absolutePath, stats };
   }
 
-  logger.warn(`[SendFile] File not found. Requested: ${filePath}. Tried: ${candidatePaths.join(", ")}`);
+  logger.warn(
+    `[SendFile] File not found. Requested: ${filePath}. Tried: ${candidatePaths.join(", ")}`,
+  );
   return null;
 }
 
@@ -191,8 +204,12 @@ export async function sendFileByApi(
   chatId: number,
   threadId: number | null,
   filePath: string,
-): Promise<{ ok: true; absolutePath: string } | { ok: false; reason: "not_found" | "not_file" | "too_large" | "send_error" }> {
-  const resolved = await resolveFileForSending(filePath);
+): Promise<
+  | { ok: true; absolutePath: string }
+  | { ok: false; reason: "not_found" | "not_file" | "too_large" | "send_error" }
+> {
+  const currentSession = getCurrentSessionByThread(threadId, chatId);
+  const resolved = await resolveFileForSending(filePath, currentSession?.directory);
   if (!resolved) {
     return { ok: false, reason: "not_found" };
   }
@@ -226,7 +243,9 @@ export async function sendFileToChat(ctx: Context, filePath: string): Promise<bo
   }
 
   try {
-    const resolved = await resolveFileForSending(filePath);
+    const threadId = resolveThreadIdFromContext(ctx);
+    const currentSession = getCurrentSessionByThread(threadId, ctx.chat?.id ?? null);
+    const resolved = await resolveFileForSending(filePath, currentSession?.directory);
     if (!resolved) {
       await ctx.reply(t("sendfile.file_not_found"));
       return false;
@@ -239,11 +258,11 @@ export async function sendFileToChat(ctx: Context, filePath: string): Promise<bo
 
     const fileSizeKb = Math.floor(Number(resolved.stats.size) / 1024);
     if (fileSizeKb > config.files.maxFileSizeKb) {
-      await ctx.reply(t("sendfile.too_large", { size: fileSizeKb, limit: config.files.maxFileSizeKb }));
+      await ctx.reply(
+        t("sendfile.too_large", { size: fileSizeKb, limit: config.files.maxFileSizeKb }),
+      );
       return false;
     }
-
-    const threadId = resolveThreadIdFromContext(ctx);
 
     logger.info(`[SendFile] Sending file: ${resolved.absolutePath}`);
 
@@ -268,7 +287,7 @@ export async function sendfileCommand(ctx: CommandContext<Context>) {
   }
 
   const filePath = args.trim();
-  
+
   if (!filePath) {
     await ctx.reply(t("sendfile.usage"));
     return;

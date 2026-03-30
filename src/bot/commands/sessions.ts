@@ -2,7 +2,7 @@ import { CommandContext, Context } from "grammy";
 import { InlineKeyboard } from "grammy";
 import { opencodeClient } from "../../opencode/client.js";
 import { setCurrentSession, SessionInfo } from "../../session/manager.js";
-import { getCurrentProject } from "../../settings/manager.js";
+import { getCurrentProjectForScope } from "../../project/scope.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
@@ -132,7 +132,8 @@ async function loadRootSessionsForMenu(directory: string): Promise<SessionWithCh
 
 export async function sessionsCommand(ctx: CommandContext<Context>) {
   try {
-    const currentProject = getCurrentProject();
+    const threadId = ctx.message?.message_thread_id ?? null;
+    const currentProject = getCurrentProjectForScope(threadId, ctx.chat?.id ?? null);
 
     if (!currentProject) {
       await ctx.reply(t("sessions.project_not_selected"));
@@ -231,7 +232,7 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
   }
 
   try {
-    const currentProject = getCurrentProject();
+    const currentProject = getCurrentProjectForScope(callbackThreadId, ctx.chat?.id ?? null);
 
     if (!currentProject) {
       clearAllInteractionState("session_select_project_missing");
@@ -383,7 +384,12 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
       };
     }
 
-    if (!childSessionId && action !== "children" && compactAction !== "m" && compactAction !== "c") {
+    if (
+      !childSessionId &&
+      action !== "children" &&
+      compactAction !== "m" &&
+      compactAction !== "c"
+    ) {
       const rootSessions = await loadRootSessionsForMenu(currentProject.worktree);
       const mainSession = rootSessions.find((s) => s.id === selectedSession.id);
       if (mainSession && mainSession.children && mainSession.children.length > 0) {
@@ -443,8 +449,13 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
     }
 
     // Initialize pinned message manager for this chat
-    if (ctx.chat && (!pinnedMessageManager.isInitialized() || pinnedMessageManager.getState().chatId !== ctx.chat.id)) {
-      pinnedMessageManager.initialize(ctx.api, ctx.chat.id);
+    if (
+      ctx.chat &&
+      (!pinnedMessageManager.isInitialized() ||
+        pinnedMessageManager.getState().chatId !== ctx.chat.id ||
+        pinnedMessageManager.getState().threadId !== threadId)
+    ) {
+      pinnedMessageManager.initialize(ctx.api, ctx.chat.id, threadId);
     }
 
     // Initialize keyboard manager if not already
@@ -454,10 +465,17 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
 
     try {
       // Create new pinned message for this session
-      await pinnedMessageManager.onSessionChange(selectedSession.id, selectedSession.title);
+      await pinnedMessageManager.onSessionChange(
+        selectedSession.id,
+        selectedSession.title,
+        currentProject.worktree,
+      );
       // Load context from session history (for existing sessions)
       // Wait for it to complete so keyboard has correct context
-      await pinnedMessageManager.loadContextFromHistory(selectedSession.id, currentProject.worktree);
+      await pinnedMessageManager.loadContextFromHistory(
+        selectedSession.id,
+        currentProject.worktree,
+      );
     } catch (err) {
       logger.error("[Bot] Error initializing pinned message:", err);
     }
@@ -483,10 +501,14 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
       // Send session selection confirmation with updated keyboard
       const keyboard = keyboardManager.getKeyboard();
       try {
-          await ctx.api.sendMessage(chatId, t("sessions.selected", { title: selectedSession.title }), {
+        await ctx.api.sendMessage(
+          chatId,
+          t("sessions.selected", { title: selectedSession.title }),
+          {
             reply_markup: keyboard,
             message_thread_id: threadId ?? undefined,
-          });
+          },
+        );
       } catch (err) {
         logger.error("[Sessions] Failed to send selection message:", err);
       }

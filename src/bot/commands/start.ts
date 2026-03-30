@@ -8,9 +8,14 @@ import { keyboardManager } from "../../keyboard/manager.js";
 import { t } from "../../i18n/index.js";
 
 export async function startCommand(ctx: Context): Promise<void> {
+  const threadId = ctx.message?.message_thread_id ?? null;
   if (ctx.chat) {
-    if (!pinnedMessageManager.isInitialized() || pinnedMessageManager.getState().chatId !== ctx.chat.id) {
-      pinnedMessageManager.initialize(ctx.api, ctx.chat.id);
+    if (
+      !pinnedMessageManager.isInitialized() ||
+      pinnedMessageManager.getState().chatId !== ctx.chat.id ||
+      pinnedMessageManager.getState().threadId !== threadId
+    ) {
+      pinnedMessageManager.initialize(ctx.api, ctx.chat.id, threadId);
     }
     keyboardManager.initialize(ctx.api, ctx.chat.id);
   }
@@ -20,7 +25,6 @@ export async function startCommand(ctx: Context): Promise<void> {
   }
 
   // Get current agent, model, and context
-  const threadId = ctx.message?.message_thread_id ?? null;
   const currentAgent = getStoredAgent(threadId, ctx.chat?.id ?? null);
   const currentModel = getStoredModel(threadId, ctx.chat?.id ?? null);
   const variantName = formatVariantForButton(currentModel.variant || "default");

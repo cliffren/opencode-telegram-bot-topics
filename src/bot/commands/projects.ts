@@ -1,9 +1,9 @@
 import { CommandContext, Context } from "grammy";
 import { InlineKeyboard } from "grammy";
-import { setCurrentProject, getCurrentProject } from "../../settings/manager.js";
-import { getProjects } from "../../project/manager.js";
-import { syncSessionDirectoryCache } from "../../session/cache-manager.js";
 import { clearSession } from "../../session/manager.js";
+import { getProjects } from "../../project/manager.js";
+import { getCurrentProjectForScope, selectProjectForScope } from "../../project/scope.js";
+import { syncSessionDirectoryCache } from "../../session/cache-manager.js";
 import { summaryAggregator } from "../../summary/aggregator.js";
 import { pinnedMessageManager } from "../../pinned/manager.js";
 import { keyboardManager } from "../../keyboard/manager.js";
@@ -13,6 +13,7 @@ import { formatVariantForButton } from "../../variant/manager.js";
 import { clearAllInteractionState } from "../../interaction/cleanup.js";
 import { createMainKeyboard } from "../utils/keyboard.js";
 import { ensureActiveInlineMenu, replyWithInlineMenu } from "../handlers/inline-menu.js";
+import { clearSessionByThread } from "../handlers/prompt.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { config } from "../../config.js";
@@ -42,7 +43,8 @@ export async function projectsCommand(ctx: CommandContext<Context>) {
     }
 
     const keyboard = new InlineKeyboard();
-    const currentProject = getCurrentProject();
+    const threadId = ctx.message?.message_thread_id ?? null;
+    const currentProject = getCurrentProjectForScope(threadId, ctx.chat?.id ?? null);
 
     projectsToShow.forEach((project, index) => {
       const isActive =
@@ -97,13 +99,18 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
       `[Bot] Project selected: ${selectedProject.name || selectedProject.worktree} (id: ${projectId})`,
     );
 
-    setCurrentProject(selectedProject);
+    const threadId = ctx.callbackQuery?.message?.message_thread_id ?? null;
+    selectProjectForScope(selectedProject, threadId, ctx.chat?.id ?? null);
     clearSession();
+    clearSessionByThread(threadId, ctx.chat?.id ?? null);
     summaryAggregator.clear();
     clearAllInteractionState("project_switched");
 
     // Clear pinned message when switching projects
     try {
+      if (ctx.chat) {
+        pinnedMessageManager.initialize(ctx.api, ctx.chat.id, threadId);
+      }
       await pinnedMessageManager.clear();
     } catch (err) {
       logger.error("[Bot] Error clearing pinned message:", err);
@@ -122,7 +129,6 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
     keyboardManager.updateContext(0, contextLimit);
 
     // Get current state for keyboard (with context = 0)
-    const threadId = ctx.callbackQuery?.message?.message_thread_id ?? null;
     const currentAgent = getStoredAgent(threadId, ctx.chat?.id ?? null);
     const currentModel = getStoredModel(threadId, ctx.chat?.id ?? null);
     const contextInfo = { tokensUsed: 0, tokensLimit: contextLimit };

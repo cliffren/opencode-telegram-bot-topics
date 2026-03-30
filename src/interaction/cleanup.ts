@@ -13,7 +13,7 @@ export function clearAllInteractionState(reason: string): void {
   questionManager.clear();
   permissionManager.clear();
   renameManager.clear();
-  interactionManager.clear(reason);
+  interactionManager.clearAll(reason);
 
   const hasAnyActiveState =
     questionActive || permissionActive || renameActive || interactionSnapshot !== null;

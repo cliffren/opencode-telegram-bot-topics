@@ -35,6 +35,7 @@ export interface SessionDirectoryCacheInfo {
 
 export interface Settings {
   currentProject?: ProjectInfo;
+  scopedProjects?: Record<string, ProjectInfo>;
   currentSession?: SessionInfo;
   scopedSessions?: Record<string, SessionInfo>;
   currentAgent?: string;
@@ -42,6 +43,7 @@ export interface Settings {
   currentModel?: ModelInfo;
   scopedModels?: Record<string, ModelInfo>;
   pinnedMessageId?: number;
+  scopedPinnedMessageIds?: Record<string, number>;
   serverProcess?: ServerProcessInfo;
   sessionDirectoryCache?: SessionDirectoryCacheInfo;
   scheduledTasks?: ScheduledTask[];
@@ -145,6 +147,30 @@ export function setCurrentProject(projectInfo: ProjectInfo): void {
 
 export function clearProject(): void {
   currentSettings.currentProject = undefined;
+  void writeSettingsFile(currentSettings);
+}
+
+export function getScopedProject(scopeKey: string): ProjectInfo | undefined {
+  return currentSettings.scopedProjects?.[scopeKey];
+}
+
+export function setScopedProject(scopeKey: string, projectInfo: ProjectInfo): void {
+  const existing = currentSettings.scopedProjects ?? {};
+  currentSettings.scopedProjects = {
+    ...existing,
+    [scopeKey]: projectInfo,
+  };
+  void writeSettingsFile(currentSettings);
+}
+
+export function clearScopedProject(scopeKey: string): void {
+  if (!currentSettings.scopedProjects || !(scopeKey in currentSettings.scopedProjects)) {
+    return;
+  }
+
+  const rest = { ...currentSettings.scopedProjects };
+  delete rest[scopeKey];
+  currentSettings.scopedProjects = rest;
   void writeSettingsFile(currentSettings);
 }
 
@@ -277,6 +303,33 @@ export function setPinnedMessageId(messageId: number): void {
 
 export function clearPinnedMessageId(): void {
   currentSettings.pinnedMessageId = undefined;
+  void writeSettingsFile(currentSettings);
+}
+
+export function getScopedPinnedMessageId(scopeKey: string): number | undefined {
+  return currentSettings.scopedPinnedMessageIds?.[scopeKey];
+}
+
+export function setScopedPinnedMessageId(scopeKey: string, messageId: number): void {
+  const existing = currentSettings.scopedPinnedMessageIds ?? {};
+  currentSettings.scopedPinnedMessageIds = {
+    ...existing,
+    [scopeKey]: messageId,
+  };
+  void writeSettingsFile(currentSettings);
+}
+
+export function clearScopedPinnedMessageId(scopeKey: string): void {
+  if (
+    !currentSettings.scopedPinnedMessageIds ||
+    !(scopeKey in currentSettings.scopedPinnedMessageIds)
+  ) {
+    return;
+  }
+
+  const rest = { ...currentSettings.scopedPinnedMessageIds };
+  delete rest[scopeKey];
+  currentSettings.scopedPinnedMessageIds = rest;
   void writeSettingsFile(currentSettings);
 }
 

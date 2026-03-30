@@ -1,7 +1,6 @@
 import { CommandContext, Context } from "grammy";
 import { opencodeClient } from "../../opencode/client.js";
-import { getCurrentSession } from "../../session/manager.js";
-import { getCurrentProject } from "../../settings/manager.js";
+import { getCurrentProjectForScope } from "../../project/scope.js";
 import { fetchCurrentAgent } from "../../agent/manager.js";
 import { getAgentDisplayName } from "../../agent/types.js";
 import { fetchCurrentModelForScope } from "../../model/manager.js";
@@ -50,7 +49,7 @@ export async function statusCommand(ctx: CommandContext<Context>) {
     const modelDisplay = formatModelForDisplay(currentModel.providerID, currentModel.modelID);
     message += `${t("status.line.model", { model: modelDisplay })}\n`;
 
-    const currentProject = getCurrentProject();
+    const currentProject = getCurrentProjectForScope(threadId, ctx.chat?.id ?? null);
     if (currentProject) {
       const projectName = currentProject.name || currentProject.worktree;
       message += `\n${t("status.project_selected", { project: projectName })}\n`;
@@ -59,7 +58,7 @@ export async function statusCommand(ctx: CommandContext<Context>) {
       message += t("status.project_hint");
     }
 
-    const currentSession = getCurrentSessionByThread(threadId, ctx.chat?.id ?? null) ?? getCurrentSession();
+    const currentSession = getCurrentSessionByThread(threadId, ctx.chat?.id ?? null);
     if (currentSession) {
       message += `\n${t("status.session_selected", { title: currentSession.title })}\n`;
     } else {

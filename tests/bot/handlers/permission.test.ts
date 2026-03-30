@@ -16,6 +16,8 @@ const mocked = vi.hoisted(() => ({
     worktree: "D:/repo",
   } as { id: string; worktree: string } | undefined,
   currentSession: null as { id: string; title: string; directory: string } | null,
+  scopedProject: null as { id: string; worktree: string } | null,
+  scopedSession: null as { id: string; title: string; directory: string } | null,
 }));
 
 vi.mock("../../../src/opencode/client.js", () => ({
@@ -33,6 +35,22 @@ vi.mock("../../../src/settings/manager.js", () => ({
 vi.mock("../../../src/session/manager.js", () => ({
   getCurrentSession: vi.fn(() => mocked.currentSession),
 }));
+
+vi.mock("../../../src/project/scope.js", () => ({
+  getCurrentProjectForScope: vi.fn(() => mocked.scopedProject),
+}));
+
+vi.mock("../../../src/bot/handlers/prompt.js", async () => {
+  const actual = await vi.importActual<typeof import("../../../src/bot/handlers/prompt.js")>(
+    "../../../src/bot/handlers/prompt.js",
+  );
+
+  return {
+    ...actual,
+    getCurrentSessionByThread: vi.fn(() => mocked.scopedSession),
+    getPromptThreadId: vi.fn(() => null),
+  };
+});
 
 vi.mock("../../../src/utils/safe-background-task.js", () => ({
   safeBackgroundTask: ({
@@ -109,9 +127,11 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe("bot/handlers/permission", () => {
+  const permissionScope = "777:private";
+
   beforeEach(() => {
     permissionManager.clear();
-    interactionManager.clear("test_setup");
+    interactionManager.clearAll("test_setup");
 
     mocked.permissionReplyMock.mockReset();
     mocked.permissionReplyMock.mockResolvedValue({ error: null });
@@ -121,6 +141,8 @@ describe("bot/handlers/permission", () => {
       worktree: "D:/repo",
     };
     mocked.currentSession = null;
+    mocked.scopedProject = null;
+    mocked.scopedSession = null;
   });
 
   it("starts permission interaction and stores message id", async () => {
@@ -146,7 +168,7 @@ describe("bot/handlers/permission", () => {
     expect(permissionManager.getMessageId()).toBe(500);
     expect(permissionManager.getPendingCount()).toBe(1);
 
-    const state = interactionManager.getSnapshot();
+    const state = interactionManager.getSnapshot(permissionScope);
     expect(state?.kind).toBe("permission");
     expect(state?.expectedInput).toBe("callback");
     expect(state?.metadata.requestID).toBe("perm-1");
@@ -193,7 +215,7 @@ describe("bot/handlers/permission", () => {
     expect(permissionManager.getMessageIds()).toEqual([500, 501]);
     expect(permissionManager.getPendingCount()).toBe(2);
 
-    const state = interactionManager.getSnapshot();
+    const state = interactionManager.getSnapshot(permissionScope);
     expect(state?.kind).toBe("permission");
     expect(state?.metadata.requestID).toBe("perm-2");
     expect(state?.metadata.messageId).toBe(501);
@@ -271,6 +293,9 @@ describe("bot/handlers/permission", () => {
     const botApi = createBotApi(600);
     await showPermissionRequest(botApi, 777, createPermissionRequest("perm-valid"));
 
+    mocked.scopedProject = { id: "project-1", worktree: "D:/repo" };
+    mocked.scopedSession = { id: "session-1", title: "Scoped", directory: "D:/repo" };
+
     const ctx = createPermissionCallbackContext("permission:always", 600);
     const handled = await handlePermissionCallback(ctx);
 
@@ -287,7 +312,50 @@ describe("bot/handlers/permission", () => {
     });
 
     expect(permissionManager.isActive()).toBe(false);
-    expect(interactionManager.getSnapshot()).toBeNull();
+    expect(interactionManager.getSnapshot(permissionScope)).toBeNull();
+  });
+
+  it("uses scope-specific session directory for permission reply", async () => {
+    const botApi = createBotApi(610);
+    await showPermissionRequest(botApi, 777, createPermissionRequest("perm-scoped"));
+
+    mocked.currentProject = {
+      id: "project-global",
+      worktree: "D:/wrong-project",
+    };
+    mocked.currentSession = null;
+    mocked.scopedProject = {
+      id: "project-scoped",
+      worktree: "D:/scoped-project",
+    };
+    mocked.scopedSession = {
+      id: "session-scoped",
+      title: "Scoped",
+      directory: "D:/scoped-session",
+    };
+
+    const ctx = {
+      ...createPermissionCallbackContext("permission:once", 610),
+      callbackQuery: {
+        data: "permission:once",
+        message: {
+          message_id: 610,
+          message_thread_id: 42,
+        },
+      } as Context["callbackQuery"],
+    } as Context;
+
+    const handled = await handlePermissionCallback(ctx);
+
+    expect(handled).toBe(true);
+
+    await flushMicrotasks();
+
+    expect(mocked.permissionReplyMock).toHaveBeenCalledWith({
+      requestID: "perm-scoped",
+      directory: "D:/scoped-session",
+      reply: "once",
+    });
   });
 
   it("keeps permission interaction active until all requests are replied", async () => {
@@ -298,6 +366,9 @@ describe("bot/handlers/permission", () => {
     const sendMessageMock = botApi.sendMessage as unknown as ReturnType<typeof vi.fn>;
     sendMessageMock.mockResolvedValueOnce({ message_id: 701 });
     await showPermissionRequest(botApi, 777, createPermissionRequest("perm-2"));
+
+    mocked.scopedProject = { id: "project-1", worktree: "D:/repo" };
+    mocked.scopedSession = { id: "session-1", title: "Scoped", directory: "D:/repo" };
 
     const firstCtx = createPermissionCallbackContext("permission:once", 700);
     const firstHandled = await handlePermissionCallback(firstCtx);
@@ -317,7 +388,7 @@ describe("bot/handlers/permission", () => {
     expect(permissionManager.getPendingCount()).toBe(1);
     expect(permissionManager.getRequestID(701)).toBe("perm-2");
 
-    const stateAfterFirstReply = interactionManager.getSnapshot();
+    const stateAfterFirstReply = interactionManager.getSnapshot(permissionScope);
     expect(stateAfterFirstReply?.kind).toBe("permission");
     expect(stateAfterFirstReply?.expectedInput).toBe("callback");
     expect(stateAfterFirstReply?.metadata.pendingCount).toBe(1);
@@ -339,7 +410,7 @@ describe("bot/handlers/permission", () => {
     });
 
     expect(permissionManager.isActive()).toBe(false);
-    expect(interactionManager.getSnapshot()).toBeNull();
+    expect(interactionManager.getSnapshot(permissionScope)).toBeNull();
   });
 
   it("clears states when permission message cannot be sent", async () => {
@@ -355,7 +426,7 @@ describe("bot/handlers/permission", () => {
     expect(botApi.sendMessage).toHaveBeenCalledTimes(2);
 
     expect(permissionManager.isActive()).toBe(false);
-    expect(interactionManager.getSnapshot()).toBeNull();
+    expect(interactionManager.getSnapshot(permissionScope)).toBeNull();
   });
 
   it("retries permission message send once after transient failure", async () => {

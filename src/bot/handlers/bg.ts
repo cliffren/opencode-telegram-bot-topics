@@ -1,5 +1,6 @@
 import { Context, InlineKeyboard } from "grammy";
 import { interactionManager } from "../../interaction/manager.js";
+import { getInteractionScopeKey } from "../../interaction/scope.js";
 import type { InteractionState } from "../../interaction/types.js";
 import {
   applyBgNotify,
@@ -60,8 +61,10 @@ function getScope(ctx: Context): { chatId: number | null; threadId: number | nul
   };
 }
 
-function getActiveBgState(): { state: InteractionState; metadata: BgInteractionMetadata } | null {
-  const state = interactionManager.getSnapshot();
+function getActiveBgState(
+  scopeKey?: string,
+): { state: InteractionState; metadata: BgInteractionMetadata } | null {
+  const state = interactionManager.getSnapshot(scopeKey);
   if (!state || state.kind !== "custom") {
     return null;
   }
@@ -102,38 +105,46 @@ function getBgExpectedInput(step: BgStep): "callback" | "mixed" {
 
 function startBgInteraction(ctx: Context, step: BgStep, messageId?: number, draft?: BgDraft): void {
   const scope = getScope(ctx);
-  interactionManager.start({
-    kind: "custom",
-    expectedInput: getBgExpectedInput(step),
-    allowedCommands: BG_ALLOWED_COMMANDS,
-    metadata: {
-      flow: "bg",
-      step,
-      messageId,
-      interactionChatId: scope.chatId,
-      interactionThreadId: scope.threadId,
-      draft,
+  const scopeKey = getInteractionScopeKey(scope.chatId, scope.threadId);
+  interactionManager.start(
+    {
+      kind: "custom",
+      expectedInput: getBgExpectedInput(step),
+      allowedCommands: BG_ALLOWED_COMMANDS,
+      metadata: {
+        flow: "bg",
+        step,
+        messageId,
+        interactionChatId: scope.chatId,
+        interactionThreadId: scope.threadId,
+        draft,
+      },
     },
-  });
+    scopeKey,
+  );
 }
 
 function transitionBgInteraction(step: BgStep, metadata: BgInteractionMetadata): void {
-  interactionManager.transition({
-    expectedInput: getBgExpectedInput(step),
-    allowedCommands: BG_ALLOWED_COMMANDS,
-    metadata: {
-      ...metadata,
-      step,
+  const scopeKey = getInteractionScopeKey(metadata.interactionChatId, metadata.interactionThreadId);
+  interactionManager.transition(
+    {
+      expectedInput: getBgExpectedInput(step),
+      allowedCommands: BG_ALLOWED_COMMANDS,
+      metadata: {
+        ...metadata,
+        step,
+      },
     },
-  });
+    scopeKey,
+  );
 }
 
-function clearBgInteraction(): void {
-  const active = getActiveBgState();
+function clearBgInteraction(scopeKey?: string): void {
+  const active = getActiveBgState(scopeKey);
   if (!active) {
     return;
   }
-  interactionManager.clear("bg_finished");
+  interactionManager.clear("bg_finished", scopeKey);
 }
 
 async function removeBgMenuMessage(ctx: Context, metadata: BgInteractionMetadata): Promise<void> {
@@ -151,9 +162,7 @@ function ensureSessionForCreate(
   ctx: Context,
 ): { id: string; title: string; directory: string } | null {
   const scope = getScope(ctx);
-  const scopedSession = getCurrentSessionByThread(scope.threadId, scope.chatId);
-  const fallbackSession = getCurrentSession();
-  return scopedSession ?? fallbackSession;
+  return getCurrentSessionByThread(scope.threadId, scope.chatId);
 }
 
 function formatShortTaskId(taskId: string): string {
@@ -298,7 +307,9 @@ export async function handleBgCallback(ctx: Context): Promise<boolean> {
   if (!data || !data.startsWith(BG_CALLBACK_PREFIX)) {
     return false;
   }
-  const active = getActiveBgState();
+  const scope = getScope(ctx);
+  const scopeKey = getInteractionScopeKey(scope.chatId, scope.threadId);
+  const active = getActiveBgState(scopeKey);
   if (!active) {
     await ctx
       .answerCallbackQuery({ text: t("inline.inactive_callback"), show_alert: true })
@@ -307,8 +318,6 @@ export async function handleBgCallback(ctx: Context): Promise<boolean> {
   }
   const { metadata } = active;
   const action = data.slice(BG_CALLBACK_PREFIX.length);
-  const scope = getScope(ctx);
-
   const shouldRefreshTasks =
     action === "list" ||
     action.startsWith("page:") ||
@@ -321,7 +330,7 @@ export async function handleBgCallback(ctx: Context): Promise<boolean> {
 
   if (action === "cancel") {
     await removeBgMenuMessage(ctx, metadata);
-    clearBgInteraction();
+    clearBgInteraction(scopeKey);
     await ctx.answerCallbackQuery({ text: t("inline.cancelled_callback") }).catch(() => {});
     return true;
   }
@@ -386,11 +395,7 @@ export async function handleBgCallback(ctx: Context): Promise<boolean> {
       return true;
     }
     await ctx.answerCallbackQuery().catch(() => {});
-    await finalizeBgTaskCreation(
-      ctx,
-      { ...draft, postActionType: choice },
-      metadata,
-    );
+    await finalizeBgTaskCreation(ctx, { ...draft, postActionType: choice }, metadata);
     return true;
   }
 
@@ -506,7 +511,8 @@ export async function handleBgTextInput(ctx: Context): Promise<boolean> {
   if (!text || text.startsWith("/")) {
     return false;
   }
-  const active = getActiveBgState();
+  const scope = getScope(ctx);
+  const active = getActiveBgState(getInteractionScopeKey(scope.chatId, scope.threadId));
   if (!active) {
     return false;
   }
@@ -555,7 +561,7 @@ async function finalizeBgTaskCreation(
   const mainPrompt = draft.prompt?.trim();
 
   if (!session || scope.chatId === null || !mainPrompt) {
-    clearBgInteraction();
+    clearBgInteraction(getInteractionScopeKey(scope.chatId, scope.threadId));
     await removeBgMenuMessage(ctx, metadata);
     await ctx.reply(t("bg.create.no_session"));
     return;
@@ -563,7 +569,7 @@ async function finalizeBgTaskCreation(
 
   const currentAgent = getStoredAgent(scope.threadId, scope.chatId);
   if (currentAgent === "plan") {
-    clearBgInteraction();
+    clearBgInteraction(getInteractionScopeKey(scope.chatId, scope.threadId));
     await removeBgMenuMessage(ctx, metadata);
     await ctx.reply(t("bg.create.plan_mode_blocked"));
     return;
@@ -590,14 +596,14 @@ async function finalizeBgTaskCreation(
       postAction,
     });
 
-    clearBgInteraction();
+    clearBgInteraction(getInteractionScopeKey(scope.chatId, scope.threadId));
     await removeBgMenuMessage(ctx, metadata);
     await ctx.reply(t("bg.create.queued"), { reply_to_message_id: ctx.message?.message_id });
 
     runBgDispatch(created);
   } catch (error) {
     logger.error("[BG] Failed to create background task", error);
-    clearBgInteraction();
+    clearBgInteraction(getInteractionScopeKey(scope.chatId, scope.threadId));
     await removeBgMenuMessage(ctx, metadata);
     await ctx.reply(t("bg.create.failed"));
   }

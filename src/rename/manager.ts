@@ -9,63 +9,82 @@ interface RenameState {
 }
 
 class RenameManager {
-  private state: RenameState = {
-    isWaiting: false,
-    sessionId: null,
-    sessionDirectory: null,
-    currentTitle: null,
-    messageId: null,
-  };
+  private states = new Map<string, RenameState>();
 
-  startWaiting(sessionId: string, directory: string, currentTitle: string): void {
+  private resolveScopeKey(scopeKey?: string): string {
+    return scopeKey ?? "global";
+  }
+
+  private getState(scopeKey?: string): RenameState {
+    return (
+      this.states.get(this.resolveScopeKey(scopeKey)) ?? {
+        isWaiting: false,
+        sessionId: null,
+        sessionDirectory: null,
+        currentTitle: null,
+        messageId: null,
+      }
+    );
+  }
+
+  startWaiting(
+    sessionId: string,
+    directory: string,
+    currentTitle: string,
+    scopeKey?: string,
+  ): void {
     logger.info(`[RenameManager] Starting rename flow for session: ${sessionId}`);
-    this.state = {
+    this.states.set(this.resolveScopeKey(scopeKey), {
       isWaiting: true,
       sessionId,
       sessionDirectory: directory,
       currentTitle,
       messageId: null,
-    };
+    });
   }
 
-  setMessageId(messageId: number): void {
-    this.state.messageId = messageId;
+  setMessageId(messageId: number, scopeKey?: string): void {
+    const state = this.getState(scopeKey);
+    state.messageId = messageId;
+    this.states.set(this.resolveScopeKey(scopeKey), state);
   }
 
-  getMessageId(): number | null {
-    return this.state.messageId;
+  getMessageId(scopeKey?: string): number | null {
+    return this.getState(scopeKey).messageId;
   }
 
-  isActiveMessage(messageId: number | null): boolean {
-    return (
-      this.state.isWaiting && this.state.messageId !== null && this.state.messageId === messageId
-    );
+  isActiveMessage(messageId: number | null, scopeKey?: string): boolean {
+    const state = this.getState(scopeKey);
+    return state.isWaiting && state.messageId !== null && state.messageId === messageId;
   }
 
-  isWaitingForName(): boolean {
-    return this.state.isWaiting;
+  isWaitingForName(scopeKey?: string): boolean {
+    return this.getState(scopeKey).isWaiting;
   }
 
-  getSessionInfo(): { sessionId: string; directory: string; currentTitle: string } | null {
-    if (!this.state.isWaiting || !this.state.sessionId) {
+  getSessionInfo(
+    scopeKey?: string,
+  ): { sessionId: string; directory: string; currentTitle: string } | null {
+    const state = this.getState(scopeKey);
+    if (!state.isWaiting || !state.sessionId) {
       return null;
     }
     return {
-      sessionId: this.state.sessionId,
-      directory: this.state.sessionDirectory!,
-      currentTitle: this.state.currentTitle!,
+      sessionId: state.sessionId,
+      directory: state.sessionDirectory!,
+      currentTitle: state.currentTitle!,
     };
   }
 
-  clear(): void {
+  clear(scopeKey?: string): void {
     logger.debug("[RenameManager] Clearing rename state");
-    this.state = {
+    this.states.set(this.resolveScopeKey(scopeKey), {
       isWaiting: false,
       sessionId: null,
       sessionDirectory: null,
       currentTitle: null,
       messageId: null,
-    };
+    });
   }
 }
 
