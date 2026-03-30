@@ -44,6 +44,32 @@ class PermissionManager {
   }
 
   /**
+   * Check whether request ID is already tracked
+   */
+  hasRequestId(requestId: string): boolean {
+    for (const request of this.state.requestsByMessageId.values()) {
+      if (request.id === requestId) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Find Telegram message ID by permission request ID
+   */
+  getMessageIdByRequestId(requestId: string): number | null {
+    for (const [messageId, request] of this.state.requestsByMessageId.entries()) {
+      if (request.id === requestId) {
+        return messageId;
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Get permission type (bash, edit, etc.) by message ID
    */
   getPermissionType(messageId: number | null): string | null {

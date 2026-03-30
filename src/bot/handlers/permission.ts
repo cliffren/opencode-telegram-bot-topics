@@ -42,6 +42,8 @@ const PERMISSION_EMOJIS: Record<string, string> = {
   lsp: "🔧",
 };
 
+const inFlightPermissionRequestIds = new Set<string>();
+
 function escapeMarkdown(text: string): string {
   return text.replace(/([_*\[\]`\\])/g, "\\$1");
 }
@@ -207,7 +209,11 @@ async function handlePermissionReply(
       if (error) {
         logger.error("[PermissionHandler] Failed to send permission reply:", error);
         if (ctx.api && chatId) {
-          void ctx.api.sendMessage(chatId, t("permission.send_reply_error"), { message_thread_id: threadId ?? undefined }).catch(() => {});
+          void ctx.api
+            .sendMessage(chatId, t("permission.send_reply_error"), {
+              message_thread_id: threadId ?? undefined,
+            })
+            .catch(() => {});
         }
         return;
       }
@@ -236,18 +242,51 @@ export async function showPermissionRequest(
   chatId: number,
   request: PermissionRequest,
 ): Promise<void> {
+  if (permissionManager.hasRequestId(request.id)) {
+    logger.warn(
+      `[PermissionHandler] Duplicate permission request ignored (already tracked): requestID=${request.id}`,
+    );
+
+    syncPermissionInteractionState({
+      requestID: request.id,
+      messageId: permissionManager.getMessageIdByRequestId(request.id) ?? undefined,
+      interactionChatId: chatId,
+      interactionThreadId: getPromptThreadId(),
+    });
+    return;
+  }
+
+  if (inFlightPermissionRequestIds.has(request.id)) {
+    logger.warn(
+      `[PermissionHandler] Duplicate permission request ignored (in-flight): requestID=${request.id}`,
+    );
+    return;
+  }
+
+  inFlightPermissionRequestIds.add(request.id);
   logger.debug(`[PermissionHandler] Showing permission request: ${request.permission}`);
 
   const threadId = getPromptThreadId();
   const text = formatPermissionText(request);
   const keyboard = buildPermissionKeyboard();
+  const sendOptions = {
+    reply_markup: keyboard,
+    parse_mode: "Markdown" as const,
+    message_thread_id: threadId ?? undefined,
+  };
 
   try {
-    const message = await bot.sendMessage(chatId, text, {
-      reply_markup: keyboard,
-      parse_mode: "Markdown",
-      message_thread_id: threadId ?? undefined,
-    });
+    let message;
+
+    try {
+      message = await bot.sendMessage(chatId, text, sendOptions);
+    } catch (firstError) {
+      logger.warn(
+        `[PermissionHandler] First attempt failed, retrying permission message send once: requestID=${request.id}`,
+        firstError,
+      );
+      message = await bot.sendMessage(chatId, text, sendOptions);
+    }
 
     logger.debug(`[PermissionHandler] Message sent, messageId=${message.message_id}`);
     permissionManager.startPermission(request, message.message_id);
@@ -263,6 +302,8 @@ export async function showPermissionRequest(
   } catch (err) {
     logger.error("[PermissionHandler] Failed to send permission message:", err);
     throw err;
+  } finally {
+    inFlightPermissionRequestIds.delete(request.id);
   }
 }
 

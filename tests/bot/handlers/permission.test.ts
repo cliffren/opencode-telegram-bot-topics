@@ -164,7 +164,11 @@ describe("bot/handlers/permission", () => {
     await showPermissionRequest(botApi, 777, request);
 
     const sendMessageMock = botApi.sendMessage as unknown as ReturnType<typeof vi.fn>;
-    const [, text, options] = sendMessageMock.mock.calls[0] as [number, string, { parse_mode: string }];
+    const [, text, options] = sendMessageMock.mock.calls[0] as [
+      number,
+      string,
+      { parse_mode: string },
+    ];
 
     expect(text).toContain("external\\_directory");
     expect(options.parse_mode).toBe("Markdown");
@@ -194,6 +198,49 @@ describe("bot/handlers/permission", () => {
     expect(state?.metadata.requestID).toBe("perm-2");
     expect(state?.metadata.messageId).toBe(501);
     expect(state?.metadata.pendingCount).toBe(2);
+  });
+
+  it("ignores duplicate permission request with same request id", async () => {
+    const botApi = createBotApi(800);
+    const request = createPermissionRequest("perm-dup");
+
+    await showPermissionRequest(botApi, 777, request);
+    await showPermissionRequest(botApi, 777, request);
+
+    const sendMessageMock = botApi.sendMessage as unknown as ReturnType<typeof vi.fn>;
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(permissionManager.getPendingCount()).toBe(1);
+    expect(permissionManager.getRequestID(800)).toBe("perm-dup");
+  });
+
+  it("ignores duplicate permission request while first send is in-flight", async () => {
+    let resolveFirstSend!: (value: { message_id: number }) => void;
+
+    const sendMessageMock = vi.fn().mockImplementation(
+      () =>
+        new Promise<{ message_id: number }>((resolve) => {
+          resolveFirstSend = resolve;
+        }),
+    );
+    const botApi = {
+      sendMessage: sendMessageMock,
+      deleteMessage: vi.fn().mockResolvedValue(true),
+    } as unknown as Context["api"];
+    const request = createPermissionRequest("perm-inflight");
+
+    const firstCall = showPermissionRequest(botApi, 777, request);
+    const secondCall = showPermissionRequest(botApi, 777, request);
+
+    await Promise.resolve();
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+
+    resolveFirstSend({ message_id: 801 });
+    await firstCall;
+    await secondCall;
+
+    expect(permissionManager.getPendingCount()).toBe(1);
+    expect(permissionManager.getRequestID(801)).toBe("perm-inflight");
   });
 
   it("rejects callback from unknown permission message", async () => {
@@ -305,7 +352,25 @@ describe("bot/handlers/permission", () => {
       showPermissionRequest(botApi, 777, createPermissionRequest("perm-fail")),
     ).rejects.toThrow("send failed");
 
+    expect(botApi.sendMessage).toHaveBeenCalledTimes(2);
+
     expect(permissionManager.isActive()).toBe(false);
     expect(interactionManager.getSnapshot()).toBeNull();
+  });
+
+  it("retries permission message send once after transient failure", async () => {
+    const botApi = {
+      sendMessage: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("temporary send error"))
+        .mockResolvedValueOnce({ message_id: 900 }),
+      deleteMessage: vi.fn().mockResolvedValue(true),
+    } as unknown as Context["api"];
+
+    await showPermissionRequest(botApi, 777, createPermissionRequest("perm-retry"));
+
+    expect(botApi.sendMessage).toHaveBeenCalledTimes(2);
+    expect(permissionManager.getPendingCount()).toBe(1);
+    expect(permissionManager.getRequestID(900)).toBe("perm-retry");
   });
 });
