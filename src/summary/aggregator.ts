@@ -40,7 +40,7 @@ type ToolFileCallback = (fileInfo: ToolFileInfo) => void;
 
 type QuestionCallback = (sessionId: string, questions: Question[], requestID: string) => void;
 
-type QuestionErrorCallback = () => void;
+type QuestionErrorCallback = (sessionId: string) => void;
 
 type ThinkingCallback = (sessionId: string) => void;
 
@@ -506,7 +506,7 @@ class SummaryAggregator {
           );
           if (this.onQuestionErrorCallback) {
             setImmediate(() => {
-              this.onQuestionErrorCallback!();
+              this.onQuestionErrorCallback!(part.sessionID);
             });
           }
           return;

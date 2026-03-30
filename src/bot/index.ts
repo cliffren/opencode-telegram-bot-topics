@@ -1125,7 +1125,7 @@ async function ensureEventSubscription(directory: string): Promise<void> {
         await botInstance.api.deleteMessage(routeContext.chatId, messageId).catch(() => {});
       }
 
-      clearAllInteractionState("question_replaced_by_new_poll");
+      clearAllInteractionState("question_replaced_by_new_poll", scopeKey);
     }
 
     logger.info(`[Bot] Received ${questions.length} questions from agent, requestID=${requestID}`);
@@ -1137,21 +1137,33 @@ async function ensureEventSubscription(directory: string): Promise<void> {
     await showCurrentQuestion(botInstance.api, routeContext.chatId, scopeKey);
   });
 
-  summaryAggregator.setOnQuestionError(async () => {
+  summaryAggregator.setOnQuestionError(async (sessionId) => {
     logger.info(`[Bot] Question tool failed, clearing active poll and deleting messages`);
 
-    // Delete all messages from the invalid poll
-    const messageIds = questionManager.getMessageIds();
-    const questionRoute = questionManager.getRouteContext();
-    for (const messageId of messageIds) {
-      if (questionRoute.chatId) {
-        await botInstance?.api.deleteMessage(questionRoute.chatId, messageId).catch((err) => {
+    const routeContext = getSessionRouteContext(sessionId);
+    const scopeKey = routeContext
+      ? `${routeContext.chatId}:${routeContext.threadId ?? "private"}`
+      : undefined;
+
+    if (scopeKey && routeContext) {
+      const targetChatId = routeContext.chatId;
+      const messageIds = questionManager.getMessageIds(scopeKey);
+      for (const messageId of messageIds) {
+        await botInstance?.api.deleteMessage(targetChatId, messageId).catch((err) => {
           logger.error(`[Bot] Failed to delete question message ${messageId}:`, err);
         });
       }
     }
 
-    clearAllInteractionState("question_error");
+    if (!scopeKey) {
+      logger.warn(
+        `[Bot] Question tool error received without route context for session=${sessionId}; clearing question state only`,
+      );
+      questionManager.clear();
+      return;
+    }
+
+    clearAllInteractionState("question_error", scopeKey);
   });
 
   summaryAggregator.setOnPermission(async (request) => {
@@ -1591,7 +1603,7 @@ export function createBot(): Bot<Context> {
       }
     } catch (err) {
       logger.error("[Bot] Error handling callback:", err);
-      clearAllInteractionState("callback_handler_error");
+      clearAllInteractionState("callback_handler_error", getInteractionScopeKeyFromContext(ctx));
       await ctx.answerCallbackQuery({ text: t("callback.processing_error") }).catch(() => {});
     }
   });
@@ -1759,7 +1771,7 @@ export function createBot(): Bot<Context> {
       return;
     }
 
-    if (questionManager.isActive()) {
+    if (questionManager.isActive(getInteractionScopeKeyFromContext(ctx))) {
       await handleQuestionTextAnswer(ctx);
       return;
     }
@@ -1804,7 +1816,10 @@ export function createBot(): Bot<Context> {
 
   bot.catch((err) => {
     logger.error("[Bot] Unhandled error in bot:", err);
-    clearAllInteractionState("bot_unhandled_error");
+    clearAllInteractionState(
+      "bot_unhandled_error",
+      err.ctx ? getInteractionScopeKeyFromContext(err.ctx) : undefined,
+    );
     if (err.ctx) {
       logger.error(
         "[Bot] Error context - update type:",

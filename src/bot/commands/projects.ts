@@ -17,6 +17,7 @@ import { clearSessionByThread } from "../handlers/prompt.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { config } from "../../config.js";
+import { getInteractionScopeKeyFromContext } from "../../interaction/scope.js";
 
 const MAX_INLINE_BUTTON_LABEL_LENGTH = 64;
 
@@ -104,7 +105,7 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
     clearSession();
     clearSessionByThread(threadId, ctx.chat?.id ?? null);
     summaryAggregator.clear();
-    clearAllInteractionState("project_switched");
+    clearAllInteractionState("project_switched", getInteractionScopeKeyFromContext(ctx));
 
     // Clear pinned message when switching projects
     try {
@@ -144,7 +145,7 @@ export async function handleProjectSelect(ctx: Context): Promise<boolean> {
 
     await ctx.deleteMessage();
   } catch (error) {
-    clearAllInteractionState("project_select_error");
+    clearAllInteractionState("project_select_error", getInteractionScopeKeyFromContext(ctx));
     logger.error("[Bot] Error selecting project:", error);
     await ctx.answerCallbackQuery();
     await ctx.reply(t("projects.select_error"));

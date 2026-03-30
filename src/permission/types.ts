@@ -25,3 +25,7 @@ export type PermissionReply = "once" | "always" | "reject";
 export interface PermissionState {
   requestsByMessageId: Map<number, PermissionRequest>; // Telegram message ID -> request
 }
+
+export interface ScopedPermissionState {
+  scopes: Map<string, PermissionState>;
+}

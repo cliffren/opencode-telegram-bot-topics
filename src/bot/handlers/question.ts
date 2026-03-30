@@ -11,7 +11,7 @@ import {
 import { logger } from "../../utils/logger.js";
 import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { t } from "../../i18n/index.js";
-import { getCurrentSessionByThread, getPromptChatId, getPromptThreadId } from "./prompt.js";
+import { getCurrentSessionByThread } from "./prompt.js";
 
 const MAX_BUTTON_LENGTH = 60;
 
@@ -53,12 +53,12 @@ function syncQuestionInteractionState(
     metadata.messageId = messageId;
   }
 
-  const interactionChatId = routeContext.chatId ?? getPromptChatId();
+  const interactionChatId = routeContext.chatId;
   if (interactionChatId !== null) {
     metadata.interactionChatId = interactionChatId;
   }
 
-  metadata.interactionThreadId = routeContext.threadId ?? getPromptThreadId();
+  metadata.interactionThreadId = routeContext.threadId;
 
   const state = interactionManager.getSnapshot(scopeKey);
   if (state?.kind === "question") {
@@ -306,7 +306,7 @@ export async function showCurrentQuestion(
 ): Promise<void> {
   const question = questionManager.getCurrentQuestion(scopeKey);
   const routeContext = questionManager.getRouteContext(scopeKey);
-  const threadId = routeContext.threadId ?? getPromptThreadId();
+  const threadId = routeContext.threadId;
 
   if (!question) {
     await showPollSummary(bot, chatId, threadId, scopeKey);
@@ -394,7 +394,7 @@ async function showNextQuestion(ctx: Context, scopeKey?: string): Promise<void> 
     return;
   }
 
-  const threadId = questionManager.getRouteContext(scopeKey).threadId ?? getPromptThreadId();
+  const threadId = questionManager.getRouteContext(scopeKey).threadId;
 
   if (questionManager.hasNextQuestion(scopeKey)) {
     await showCurrentQuestion(ctx.api, ctx.chat.id, scopeKey);

@@ -7,7 +7,6 @@ import { promisify } from "node:util";
 import { config } from "../../config.js";
 import { t } from "../../i18n/index.js";
 import { logger } from "../../utils/logger.js";
-import { getPromptThreadId } from "../handlers/prompt.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,7 +41,7 @@ function resolveThreadIdFromContext(ctx: Context): number | null {
     }
   }
 
-  return getPromptThreadId();
+  return null;
 }
 
 function isThreadNotFoundError(error: unknown): boolean {
@@ -79,7 +78,9 @@ export function isScreenshotRequestText(text: string): boolean {
     return true;
   }
 
-  const hasEnScreenshot = /(take|capture|make|grab).*(a\s*)?(screenshot)|\bscreenshot\b/i.test(text);
+  const hasEnScreenshot = /(take|capture|make|grab).*(a\s*)?(screenshot)|\bscreenshot\b/i.test(
+    text,
+  );
   const hasEnSend = /(send|share|post).*(to\s*)?me|\bshow\s+me\b/i.test(text);
   const enIntent = hasEnScreenshot && (hasEnSend || /(please|can you|could you)/i.test(text));
   return enIntent;
@@ -119,11 +120,7 @@ export async function captureAndSendScreenshot(ctx: Context): Promise<boolean> {
       message_thread_id: threadId ?? undefined,
     });
 
-    await ctx.api.editMessageText(
-      ctx.chat!.id,
-      status.message_id,
-      t("screenshot.sent"),
-    );
+    await ctx.api.editMessageText(ctx.chat!.id, status.message_id, t("screenshot.sent"));
 
     logger.info(`[Screenshot] Captured and sent: ${outputPath}`);
     return true;
@@ -134,11 +131,9 @@ export async function captureAndSendScreenshot(ctx: Context): Promise<boolean> {
       ? t("screenshot.failed_thread")
       : t("screenshot.failed");
 
-    await ctx.api
-      .editMessageText(ctx.chat!.id, status.message_id, failMessage)
-      .catch(async () => {
-        await ctx.reply(failMessage);
-      });
+    await ctx.api.editMessageText(ctx.chat!.id, status.message_id, failMessage).catch(async () => {
+      await ctx.reply(failMessage);
+    });
 
     return false;
   }

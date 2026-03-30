@@ -13,7 +13,7 @@ import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { PermissionRequest, PermissionReply } from "../../permission/types.js";
 import type { I18nKey } from "../../i18n/en.js";
 import { t } from "../../i18n/index.js";
-import { getCurrentSessionByThread, getPromptThreadId } from "./prompt.js";
+import { getCurrentSessionByThread } from "./prompt.js";
 
 // Permission type display names
 const PERMISSION_NAME_KEYS: Record<string, I18nKey> = {
@@ -72,7 +72,7 @@ function syncPermissionInteractionState(
   metadata: Record<string, unknown> = {},
   scopeKey?: string,
 ): void {
-  const pendingCount = permissionManager.getPendingCount();
+  const pendingCount = permissionManager.getPendingCount(scopeKey);
 
   if (pendingCount === 0) {
     clearPermissionInteraction("permission_no_pending_requests", scopeKey);
@@ -124,19 +124,19 @@ export async function handlePermissionCallback(ctx: Context): Promise<boolean> {
   logger.debug(`[PermissionHandler] Received callback: ${data}`);
   const scopeKey = getInteractionScopeKeyFromContext(ctx);
 
-  if (!permissionManager.isActive()) {
+  if (!permissionManager.isActive(scopeKey)) {
     clearPermissionInteraction("permission_inactive_callback", scopeKey);
     await ctx.answerCallbackQuery({ text: t("permission.inactive_callback"), show_alert: true });
     return true;
   }
 
   const callbackMessageId = getCallbackMessageId(ctx);
-  if (!permissionManager.isActiveMessage(callbackMessageId)) {
+  if (!permissionManager.isActiveMessage(callbackMessageId, scopeKey)) {
     await ctx.answerCallbackQuery({ text: t("permission.inactive_callback"), show_alert: true });
     return true;
   }
 
-  const requestID = permissionManager.getRequestID(callbackMessageId);
+  const requestID = permissionManager.getRequestID(callbackMessageId, scopeKey);
   if (!requestID) {
     await ctx.answerCallbackQuery({ text: t("permission.inactive_callback"), show_alert: true });
     return true;
@@ -183,7 +183,7 @@ async function handlePermissionReply(
   const directory = currentSession?.directory ?? currentProject?.worktree;
 
   if (!directory || !chatId) {
-    permissionManager.clear();
+    permissionManager.clear(scopeKey);
     clearPermissionInteraction("permission_invalid_runtime_context", scopeKey);
 
     await ctx.answerCallbackQuery({
@@ -236,9 +236,9 @@ async function handlePermissionReply(
     },
   });
 
-  permissionManager.removeByMessageId(callbackMessageId);
+  permissionManager.removeByMessageId(callbackMessageId, scopeKey);
 
-  if (!permissionManager.isActive()) {
+  if (!permissionManager.isActive(scopeKey)) {
     clearPermissionInteraction("permission_replied", scopeKey);
     return;
   }
@@ -260,7 +260,9 @@ export async function showPermissionRequest(
   request: PermissionRequest,
   threadIdOverride?: number | null,
 ): Promise<void> {
-  if (permissionManager.hasRequestId(request.id)) {
+  const scopeKey = getInteractionScopeKey(chatId, threadIdOverride ?? null);
+
+  if (permissionManager.hasRequestId(request.id, scopeKey)) {
     logger.warn(
       `[PermissionHandler] Duplicate permission request ignored (already tracked): requestID=${request.id}`,
     );
@@ -268,11 +270,11 @@ export async function showPermissionRequest(
     syncPermissionInteractionState(
       {
         requestID: request.id,
-        messageId: permissionManager.getMessageIdByRequestId(request.id) ?? undefined,
+        messageId: permissionManager.getMessageIdByRequestId(request.id, scopeKey) ?? undefined,
         interactionChatId: chatId,
-        interactionThreadId: threadIdOverride ?? getPromptThreadId(),
+        interactionThreadId: threadIdOverride ?? null,
       },
-      getInteractionScopeKey(chatId, threadIdOverride ?? getPromptThreadId()),
+      scopeKey,
     );
     return;
   }
@@ -287,7 +289,7 @@ export async function showPermissionRequest(
   inFlightPermissionRequestIds.add(request.id);
   logger.debug(`[PermissionHandler] Showing permission request: ${request.permission}`);
 
-  const threadId = threadIdOverride ?? getPromptThreadId();
+  const threadId = threadIdOverride ?? null;
   const text = formatPermissionText(request);
   const keyboard = buildPermissionKeyboard();
   const sendOptions = {
@@ -310,7 +312,7 @@ export async function showPermissionRequest(
     }
 
     logger.debug(`[PermissionHandler] Message sent, messageId=${message.message_id}`);
-    permissionManager.startPermission(request, message.message_id);
+    permissionManager.startPermission(request, message.message_id, scopeKey);
 
     syncPermissionInteractionState(
       {
@@ -319,7 +321,7 @@ export async function showPermissionRequest(
         interactionChatId: chatId,
         interactionThreadId: threadId,
       },
-      getInteractionScopeKey(chatId, threadId),
+      scopeKey,
     );
 
     summaryAggregator.stopTypingIndicator();

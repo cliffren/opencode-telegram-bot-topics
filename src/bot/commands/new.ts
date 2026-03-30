@@ -12,6 +12,7 @@ import { getStoredModel } from "../../model/manager.js";
 import { formatVariantForButton } from "../../variant/manager.js";
 import { createMainKeyboard } from "../utils/keyboard.js";
 import { setCurrentSessionByThread } from "../handlers/prompt.js";
+import { getInteractionScopeKeyFromContext } from "../../interaction/scope.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 
@@ -50,7 +51,7 @@ export async function newCommand(ctx: CommandContext<Context>) {
     setCurrentSessionByThread(threadId, ctx.chat?.id ?? null);
 
     summaryAggregator.clear();
-    clearAllInteractionState("session_created");
+    clearAllInteractionState("session_created", getInteractionScopeKeyFromContext(ctx));
     await ingestSessionInfoForCache(session);
 
     // Initialize pinned message manager and create pinned message

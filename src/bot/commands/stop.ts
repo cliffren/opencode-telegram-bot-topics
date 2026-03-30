@@ -6,6 +6,7 @@ import { summaryAggregator } from "../../summary/aggregator.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { getCurrentSessionByThread } from "../handlers/prompt.js";
+import { getInteractionScopeKeyFromContext } from "../../interaction/scope.js";
 
 type SessionState = "idle" | "busy" | "not-found";
 
@@ -14,7 +15,6 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 function stopLocalStreaming(): void {
   stopEventListening();
   summaryAggregator.clear();
-  clearAllInteractionState("stop_command");
 }
 
 async function pollSessionStatus(
@@ -59,6 +59,7 @@ async function pollSessionStatus(
 export async function stopCommand(ctx: CommandContext<Context>) {
   try {
     stopLocalStreaming();
+    clearAllInteractionState("stop_command", getInteractionScopeKeyFromContext(ctx));
 
     const threadId = ctx.message?.message_thread_id ?? null;
     const currentSession = getCurrentSessionByThread(threadId, ctx.chat?.id ?? null);

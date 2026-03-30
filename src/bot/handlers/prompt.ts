@@ -164,7 +164,7 @@ async function resetMismatchedSessionContext(
 ): Promise<void> {
   stopEventListening();
   summaryAggregator.clear();
-  clearAllInteractionState("session_mismatch_reset");
+  clearAllInteractionState("session_mismatch_reset", getSessionScopeKey(chatId, threadId));
   clearSession();
 
   // Clear thread session for Topic isolation
@@ -617,7 +617,7 @@ export async function processUserPrompt(
   } catch (err) {
     logger.error("Error in prompt handler:", err);
     if (interactionManager.getSnapshot(getInteractionScopeKeyFromContext(ctx))) {
-      clearAllInteractionState("message_handler_error");
+      clearAllInteractionState("message_handler_error", getInteractionScopeKeyFromContext(ctx));
     }
     await ctx.reply(t("error.generic"));
     return false;

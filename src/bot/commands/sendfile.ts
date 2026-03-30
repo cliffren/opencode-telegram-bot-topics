@@ -4,7 +4,7 @@ import * as path from "path";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 import { config } from "../../config.js";
-import { getCurrentSessionByThread, getPromptThreadId } from "../handlers/prompt.js";
+import { getCurrentSessionByThread } from "../handlers/prompt.js";
 
 const FUZZY_SEARCH_MAX_FILES = 20000;
 const FUZZY_SEARCH_MAX_MATCHES = 30;
@@ -23,7 +23,7 @@ function resolveThreadIdFromContext(ctx: Context): number | null {
     }
   }
 
-  return getPromptThreadId();
+  return null;
 }
 
 function resolveCandidatePaths(filePath: string, currentDirectory?: string | null): string[] {

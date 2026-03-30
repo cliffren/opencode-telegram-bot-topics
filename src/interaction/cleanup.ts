@@ -4,22 +4,32 @@ import { renameManager } from "../rename/manager.js";
 import { interactionManager } from "./manager.js";
 import { logger } from "../utils/logger.js";
 
-export function clearAllInteractionState(reason: string): void {
-  const questionActive = questionManager.isActive();
-  const permissionActive = permissionManager.isActive();
-  const renameActive = renameManager.isWaitingForName();
-  const interactionSnapshot = interactionManager.getSnapshot();
+export function clearAllInteractionState(reason: string, scopeKey?: string): void {
+  const questionActive = questionManager.isActive(scopeKey);
+  const permissionActive = permissionManager.isActive(scopeKey);
+  const renameActive = renameManager.isWaitingForName(scopeKey);
+  const interactionSnapshot = scopeKey
+    ? interactionManager.getSnapshot(scopeKey)
+    : interactionManager.getSnapshot();
 
-  questionManager.clear();
-  permissionManager.clear();
-  renameManager.clear();
-  interactionManager.clearAll(reason);
+  if (scopeKey) {
+    questionManager.clear(scopeKey);
+    permissionManager.clear(scopeKey);
+    renameManager.clear(scopeKey);
+    interactionManager.clear(reason, scopeKey);
+  } else {
+    questionManager.clear();
+    permissionManager.clearAll();
+    renameManager.clear();
+    interactionManager.clearAll(reason);
+  }
 
   const hasAnyActiveState =
     questionActive || permissionActive || renameActive || interactionSnapshot !== null;
 
   const message =
     `[InteractionCleanup] Cleared state: reason=${reason}, ` +
+    `scope=${scopeKey ?? "all"}, ` +
     `questionActive=${questionActive}, permissionActive=${permissionActive}, ` +
     `renameActive=${renameActive}, interactionKind=${interactionSnapshot?.kind || "none"}`;
 

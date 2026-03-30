@@ -130,7 +130,7 @@ describe("bot/handlers/permission", () => {
   const permissionScope = "777:private";
 
   beforeEach(() => {
-    permissionManager.clear();
+    permissionManager.clearAll();
     interactionManager.clearAll("test_setup");
 
     mocked.permissionReplyMock.mockReset();
@@ -163,10 +163,10 @@ describe("bot/handlers/permission", () => {
     expect(replyMarkup.inline_keyboard[2]?.[0]?.text).toBe(t("permission.button.reject"));
     expect(getCallbackData(replyMarkup.inline_keyboard[2]?.[0])).toBe("permission:reject");
 
-    expect(permissionManager.isActive()).toBe(true);
-    expect(permissionManager.getRequestID(500)).toBe("perm-1");
-    expect(permissionManager.getMessageId()).toBe(500);
-    expect(permissionManager.getPendingCount()).toBe(1);
+    expect(permissionManager.isActive(permissionScope)).toBe(true);
+    expect(permissionManager.getRequestID(500, permissionScope)).toBe("perm-1");
+    expect(permissionManager.getMessageId(permissionScope)).toBe(500);
+    expect(permissionManager.getPendingCount(permissionScope)).toBe(1);
 
     const state = interactionManager.getSnapshot(permissionScope);
     expect(state?.kind).toBe("permission");
@@ -209,11 +209,11 @@ describe("bot/handlers/permission", () => {
     const deleteMessageMock = botApi.deleteMessage as unknown as ReturnType<typeof vi.fn>;
     expect(deleteMessageMock).not.toHaveBeenCalled();
 
-    expect(permissionManager.getRequestID(500)).toBe("perm-1");
-    expect(permissionManager.getRequestID(501)).toBe("perm-2");
-    expect(permissionManager.getMessageId()).toBe(501);
-    expect(permissionManager.getMessageIds()).toEqual([500, 501]);
-    expect(permissionManager.getPendingCount()).toBe(2);
+    expect(permissionManager.getRequestID(500, permissionScope)).toBe("perm-1");
+    expect(permissionManager.getRequestID(501, permissionScope)).toBe("perm-2");
+    expect(permissionManager.getMessageId(permissionScope)).toBe(501);
+    expect(permissionManager.getMessageIds(permissionScope)).toEqual([500, 501]);
+    expect(permissionManager.getPendingCount(permissionScope)).toBe(2);
 
     const state = interactionManager.getSnapshot(permissionScope);
     expect(state?.kind).toBe("permission");
@@ -232,8 +232,8 @@ describe("bot/handlers/permission", () => {
     const sendMessageMock = botApi.sendMessage as unknown as ReturnType<typeof vi.fn>;
 
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
-    expect(permissionManager.getPendingCount()).toBe(1);
-    expect(permissionManager.getRequestID(800)).toBe("perm-dup");
+    expect(permissionManager.getPendingCount(permissionScope)).toBe(1);
+    expect(permissionManager.getRequestID(800, permissionScope)).toBe("perm-dup");
   });
 
   it("ignores duplicate permission request while first send is in-flight", async () => {
@@ -261,8 +261,8 @@ describe("bot/handlers/permission", () => {
     await firstCall;
     await secondCall;
 
-    expect(permissionManager.getPendingCount()).toBe(1);
-    expect(permissionManager.getRequestID(801)).toBe("perm-inflight");
+    expect(permissionManager.getPendingCount(permissionScope)).toBe(1);
+    expect(permissionManager.getRequestID(801, permissionScope)).toBe("perm-inflight");
   });
 
   it("rejects callback from unknown permission message", async () => {
@@ -284,9 +284,9 @@ describe("bot/handlers/permission", () => {
     });
     expect(mocked.permissionReplyMock).not.toHaveBeenCalled();
 
-    expect(permissionManager.isActive()).toBe(true);
-    expect(permissionManager.getPendingCount()).toBe(2);
-    expect(permissionManager.getRequestID(501)).toBe("perm-2");
+    expect(permissionManager.isActive(permissionScope)).toBe(true);
+    expect(permissionManager.getPendingCount(permissionScope)).toBe(2);
+    expect(permissionManager.getRequestID(501, permissionScope)).toBe("perm-2");
   });
 
   it("handles valid permission reply and clears active states", async () => {
@@ -311,13 +311,13 @@ describe("bot/handlers/permission", () => {
       reply: "always",
     });
 
-    expect(permissionManager.isActive()).toBe(false);
+    expect(permissionManager.isActive(permissionScope)).toBe(false);
     expect(interactionManager.getSnapshot(permissionScope)).toBeNull();
   });
 
   it("uses scope-specific session directory for permission reply", async () => {
     const botApi = createBotApi(610);
-    await showPermissionRequest(botApi, 777, createPermissionRequest("perm-scoped"));
+    await showPermissionRequest(botApi, 777, createPermissionRequest("perm-scoped"), 42);
 
     mocked.currentProject = {
       id: "project-global",
@@ -384,9 +384,9 @@ describe("bot/handlers/permission", () => {
       reply: "once",
     });
 
-    expect(permissionManager.isActive()).toBe(true);
-    expect(permissionManager.getPendingCount()).toBe(1);
-    expect(permissionManager.getRequestID(701)).toBe("perm-2");
+    expect(permissionManager.isActive(permissionScope)).toBe(true);
+    expect(permissionManager.getPendingCount(permissionScope)).toBe(1);
+    expect(permissionManager.getRequestID(701, permissionScope)).toBe("perm-2");
 
     const stateAfterFirstReply = interactionManager.getSnapshot(permissionScope);
     expect(stateAfterFirstReply?.kind).toBe("permission");
@@ -409,7 +409,7 @@ describe("bot/handlers/permission", () => {
       reply: "reject",
     });
 
-    expect(permissionManager.isActive()).toBe(false);
+    expect(permissionManager.isActive(permissionScope)).toBe(false);
     expect(interactionManager.getSnapshot(permissionScope)).toBeNull();
   });
 
@@ -425,7 +425,7 @@ describe("bot/handlers/permission", () => {
 
     expect(botApi.sendMessage).toHaveBeenCalledTimes(2);
 
-    expect(permissionManager.isActive()).toBe(false);
+    expect(permissionManager.isActive(permissionScope)).toBe(false);
     expect(interactionManager.getSnapshot(permissionScope)).toBeNull();
   });
 
@@ -441,7 +441,22 @@ describe("bot/handlers/permission", () => {
     await showPermissionRequest(botApi, 777, createPermissionRequest("perm-retry"));
 
     expect(botApi.sendMessage).toHaveBeenCalledTimes(2);
-    expect(permissionManager.getPendingCount()).toBe(1);
-    expect(permissionManager.getRequestID(900)).toBe("perm-retry");
+    expect(permissionManager.getPendingCount(permissionScope)).toBe(1);
+    expect(permissionManager.getRequestID(900, permissionScope)).toBe("perm-retry");
+  });
+
+  it("isolates permission state per scope", async () => {
+    const privateApi = createBotApi(910);
+    const topicApi = createBotApi(920);
+
+    await showPermissionRequest(privateApi, 777, createPermissionRequest("perm-private"), null);
+    await showPermissionRequest(topicApi, 777, createPermissionRequest("perm-topic"), 42);
+
+    expect(permissionManager.isActive(permissionScope)).toBe(true);
+    expect(permissionManager.isActive("777:42")).toBe(true);
+    expect(permissionManager.getPendingCount(permissionScope)).toBe(1);
+    expect(permissionManager.getPendingCount("777:42")).toBe(1);
+    expect(permissionManager.getRequestID(910, permissionScope)).toBe("perm-private");
+    expect(permissionManager.getRequestID(920, "777:42")).toBe("perm-topic");
   });
 });

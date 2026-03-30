@@ -17,6 +17,7 @@ import { logger } from "../../utils/logger.js";
 import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { config } from "../../config.js";
 import { getLocale, t } from "../../i18n/index.js";
+import { getInteractionScopeKeyFromContext } from "../../interaction/scope.js";
 
 interface SessionWithChildren {
   id: string;
@@ -235,7 +236,10 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
     const currentProject = getCurrentProjectForScope(callbackThreadId, ctx.chat?.id ?? null);
 
     if (!currentProject) {
-      clearAllInteractionState("session_select_project_missing");
+      clearAllInteractionState(
+        "session_select_project_missing",
+        getInteractionScopeKeyFromContext(ctx),
+      );
       await ctx.answerCallbackQuery();
       await ctx.reply(t("sessions.select_project_first"));
       return true;
@@ -430,7 +434,7 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
     setCurrentSessionByThread(threadId, ctx.chat?.id ?? null);
 
     summaryAggregator.clear();
-    clearAllInteractionState("session_switched");
+    clearAllInteractionState("session_switched", getInteractionScopeKeyFromContext(ctx));
 
     await ctx.answerCallbackQuery();
 
@@ -531,7 +535,7 @@ export async function handleSessionSelect(ctx: Context): Promise<boolean> {
 
     await ctx.deleteMessage();
   } catch (error) {
-    clearAllInteractionState("session_select_error");
+    clearAllInteractionState("session_select_error", getInteractionScopeKeyFromContext(ctx));
     logger.error("[Sessions] Error selecting session:", error);
     await ctx.answerCallbackQuery();
     await ctx.reply(t("sessions.select_error"));
