@@ -153,6 +153,23 @@ describe("bot/handlers/permission", () => {
     expect(state?.metadata.messageId).toBe(500);
   });
 
+  it("escapes unknown permission names for Markdown", async () => {
+    const botApi = createBotApi(510);
+    const request: PermissionRequest = {
+      ...createPermissionRequest("perm-external"),
+      permission: "external_directory",
+      patterns: ["/Users/rentao/Projects"],
+    };
+
+    await showPermissionRequest(botApi, 777, request);
+
+    const sendMessageMock = botApi.sendMessage as unknown as ReturnType<typeof vi.fn>;
+    const [, text, options] = sendMessageMock.mock.calls[0] as [number, string, { parse_mode: string }];
+
+    expect(text).toContain("external\\_directory");
+    expect(options.parse_mode).toBe("Markdown");
+  });
+
   it("keeps multiple active permission requests without deleting previous messages", async () => {
     const botApi = createBotApi(500);
 

@@ -152,6 +152,13 @@ type SendFileDirectiveParseResult = {
 };
 
 function parseSendFileDirectives(text: string): SendFileDirectiveParseResult {
+  if (!config.bot.autoSendFiles) {
+    return {
+      sanitizedText: text.trim(),
+      filePaths: [],
+    };
+  }
+
   const filePaths: string[] = [];
 
   const withDirectiveMarkersRemoved = text.replace(

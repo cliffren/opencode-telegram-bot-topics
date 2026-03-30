@@ -310,6 +310,10 @@ function maybeAugmentPromptForSendFileIntent(
   text: string,
   scopeKey: string,
 ): { promptText: string; injected: boolean } {
+  if (!config.bot.autoSendFiles) {
+    return { promptText: text, injected: false };
+  }
+
   const directIntent = isSendFileIntent(text);
   if (directIntent) {
     pendingSendFileIntentByScope.set(scopeKey, {

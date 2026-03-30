@@ -42,6 +42,10 @@ const PERMISSION_EMOJIS: Record<string, string> = {
   lsp: "🔧",
 };
 
+function escapeMarkdown(text: string): string {
+  return text.replace(/([_*\[\]`\\])/g, "\\$1");
+}
+
 function getCallbackMessageId(ctx: Context): number | null {
   const message = ctx.callbackQuery?.message;
   if (!message || !("message_id" in message)) {
@@ -268,7 +272,7 @@ export async function showPermissionRequest(
 function formatPermissionText(request: PermissionRequest): string {
   const emoji = PERMISSION_EMOJIS[request.permission] || "🔐";
   const nameKey = PERMISSION_NAME_KEYS[request.permission];
-  const name = nameKey ? t(nameKey) : request.permission;
+  const name = escapeMarkdown(nameKey ? t(nameKey) : request.permission);
 
   let text = t("permission.header", { emoji, name });
 
